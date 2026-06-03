@@ -18,10 +18,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![PyPI](https://img.shields.io/pypi/v/forgewright.svg)](https://pypi.org/project/forgewright/)
-[![CI](https://img.shields.io/github/actions/workflow/status/forest/forgewright/ci.yml?branch=main)](https://github.com/forest/forgewright/actions)
+[![CI](https://img.shields.io/github/actions/workflow/status/NaustudentX18/forgewright/ci.yml?branch=main)](https://github.com/NaustudentX18/forgewright/actions)
 [![MCP](https://img.shields.io/badge/MCP-2025--06--18-7c3aed.svg)](https://modelcontextprotocol.io/)
-[![Discord](https://img.shields.io/badge/Discord-join-5865F2.svg)](https://discord.gg/forgewright)
 [![CalVer](https://img.shields.io/badge/calver-YYYY.MM.PATCH-orange.svg)](https://calver.org/)
+
+> **v0.1.1 (Unreleased) — PWA-ready.** The web chat now installs as a home-screen
+> app on iOS and Android, ships a versioned service worker for the app shell,
+> and runs over Tailscale HTTPS with one flag. See the [Mobile & PWA](#mobile--pwa)
+> section and the full [ROADMAP.md](./ROADMAP.md).
 
 ---
 
@@ -36,6 +40,10 @@
 - **Free, forever, MIT-licensed.** No telemetry, no token markup, no pro tier.
 
 It's the open-source answer to **Manus AI** and **Lovable** for developers who want the agent on *their* machine, using *their* keys, doing *their* bidding.
+
+**Shipped in v0.1:** layered agent stack (Base → ReAct → ToolCall → Manus + 3 sub-agents), 8 tools, 7 LLM providers, MCP server + client, default-deny sandbox (subprocess → Docker → gVisor → Firecracker), sha256-chained audit log, FastAPI web chat with SSE streaming. **739 unit tests, 0 regressions.**
+
+**Now in v0.1.1:** the web chat installs as a PWA on iOS and Android, with an offline app-shell cache and a Tailscale HTTPS one-shot. See [Mobile & PWA](#mobile--pwa) below.
 
 ---
 
@@ -376,6 +384,42 @@ Each recipe is a 5-minute read with a copy-pasteable prompt and the expected out
 
 ---
 
+## Mobile & PWA (v0.1.1, shipped)
+
+The web chat is a real Progressive Web App. Add it to your phone's home screen and it runs full-screen with its own icon, splash, and offline shell — no app store, no signing, no APK.
+
+```bash
+# On the box running forgewright (e.g. a Pi, a NAS, a VPS)
+forgewright web --bind tailscale --tailscale-serve --port 8787
+# → https://aiserver.<tailnet>.ts.net:443/forgewright  (auto-TLS via Tailscale)
+```
+
+```bash
+# On the phone — once
+# 1. Open the URL above in Safari / Chrome
+# 2. iOS:  Share → Add to Home Screen
+#    Android: the browser will prompt "Install app" automatically
+# 3. Launch from the home-screen icon — full-screen, no browser chrome
+```
+
+What you get:
+
+- **App shell precache** — instant cold start, no flash of white.
+- **Last-session offline** — read your most recent chat with the network off.
+- **Streaming unchanged** — the service worker explicitly bypasses POST so
+  SSE on `/api/sessions/{id}/messages` is bit-identical to the desktop path.
+- **Install prompt** — Chromium shows the native install card; iOS gets a
+  one-time Share-sheet hint (iOS has no `beforeinstallprompt` event).
+- **Stop / cancel** — the red button mid-stream POSTs to the existing abort
+  endpoint, server emits `event: error {"message":"aborted"}`, UI flips
+  back to Send on click for instant feedback.
+
+Static payload is **54 KB** (HTML + CSS + JS combined) — well under the
+55 KB mobile budget. Full setup, troubleshooting, and the "why Tailscale
+HTTPS" rationale live in [`docs/MOBILE.md`](./docs/MOBILE.md).
+
+---
+
 ## Project status
 
 **v0.1 — Foundation.** Layered agent stack, sandbox, LLM abstraction, CLI, MCP server, PlanningFlow, default-deny tool authorization, sha256-chained audit log. The build plan is in [`BUILD_PLAN.md`](./BUILD_PLAN.md); the research that informed it is in [`docs/RESEARCH.md`](./docs/RESEARCH.md).
@@ -387,7 +431,7 @@ Each recipe is a 5-minute read with a copy-pasteable prompt and the expected out
 ## Contributing
 
 ```bash
-git clone https://github.com/forest/forgewright
+git clone https://github.com/NaustudentX18/forgewright
 cd forgewright
 uv sync --all-extras
 uv run playwright install chromium
