@@ -1,0 +1,156 @@
+name: docker
+
+# -----------------------------------------------------------------------------
+# forgewright container image — multi-arch build, push, and keyless sign.
+#
+# Triggers:
+#   * on release published
+#   * manual workflow_dispatch (e.g. for a pre-release dry-run)
+#
+# Output: ghcr.io/forest/forgewright
+# -----------------------------------------------------------------------------
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_override:
+        description: "Optional tag to push (overrides the release tag)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write       # required for cosign keyless signing
+  attestations: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. build — multi-arch buildx, provenance + SBOM baked in, push to GHCR
+  # ---------------------------------------------------------------------------
+  build:
+    name: build + push (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: meta
+        run: |
+          set -euo pipefail
+          if [[ -n "${{ inputs.tag_override }}" ]]; then
+            TAG="${{ inputs.tag_override }}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="dev"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          # Use the GitHub Actions cache backend, sharing layers across
+          # jobs and runs.
+          driver-opts: image=moby/buildkit:latest
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta-tags
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=release
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+            type=tag,value=${{ steps.meta.outputs.tag }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          provenance: true
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.title=forgewright
+            org.opencontainers.image.description=An open-source, CLI-first AI agent framework.
+            org.opencontainers.image.source=https://github.com/${{ env.IMAGE_NAME }}
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.vendor=Forest
+          tags: ${{ steps.meta-tags.outputs.tags }}
+
+  # ---------------------------------------------------------------------------
+  # 2. sign — keyless cosign signature on the published image
+  # ---------------------------------------------------------------------------
+  sign:
+    name: cosign sign
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        id: meta
+        run: |
+          set -euo pipefail
+          if [[ -n "${{ inputs.tag_override }}" ]]; then
+            TAG="${{ inputs.tag_override }}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="latest"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "[sign] image = ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (keyless, OIDC)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}"
+          cosign sign --yes "${IMAGE}"
+
+      - name: Verify signature
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}"
+          cosign verify \
+            --certificate-identity-regexp 'https://github.com/forest/forgewright' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+            "${IMAGE}" \
+            | tee cosign-verify.txt

@@ -1,0 +1,199 @@
+[project]
+name = "forgewright"
+version = "0.1.0"
+description = "An open-source, CLI-first AI agent framework. Bring your own keys, run on your own box."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "MIT" }
+authors = [{ name = "Forest" }]
+keywords = ["ai", "agent", "cli", "mcp", "llm", "byo-keys", "sandbox", "open-source"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
+dependencies = [
+  "typer>=0.12",
+  "rich>=13.7",
+  "pydantic>=2.7,<3",
+  "pydantic-settings>=2.2,<3",
+  "loguru>=0.7",
+  "httpx>=0.27",
+  "jsonschema>=4.21",
+  "beautifulsoup4>=4.12",
+  "lxml>=5.0",
+  "prompt-toolkit>=3.0.52",
+]
+
+[project.optional-dependencies]
+llm = [
+  "litellm>=1.50",
+  "openai>=1.40",
+  "anthropic>=0.30",
+]
+mcp = [
+  "fastmcp>=0.4",
+  "mcp>=1.0",
+]
+browser = [
+  "playwright>=1.46",
+]
+sandbox = [
+  "docker>=7.0",
+]
+crawl = [
+  "crawl4ai>=0.3",
+]
+viz = [
+  "altair>=5",
+  "vl-convert-python>=1.0",
+]
+web = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+]
+all = [
+  "forgewright[llm,mcp,browser,sandbox,crawl,viz,web]",
+]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "pytest-cov>=5",
+  "ruff>=0.5",
+  "mypy>=1.10",
+  "pre-commit>=3.8",
+  "respx>=0.21",
+  "interrogate>=1.7",
+  "docker>=7.0",
+  "docker-stubs>=0.1",
+]
+
+[project.scripts]
+forgewright = "forgewright.cli.app:main"
+
+[project.urls]
+Homepage = "https://forgewright.dev"
+Repository = "https://github.com/forest/forgewright"
+Issues = "https://github.com/forest/forgewright/issues"
+Changelog = "https://github.com/forest/forgewright/blob/main/CHANGELOG.md"
+Discord = "https://discord.gg/forgewright"
+Documentation = "https://forgewright.dev/docs"
+Source = "https://github.com/forest/forgewright"
+Tracker = "https://github.com/forest/forgewright/issues"
+Funding = "https://github.com/sponsors/forest"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/forgewright/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/forgewright"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/forgewright/py.typed" = "forgewright/py.typed"
+
+# -----------------------------------------------------------------------------
+# cibuildwheel — cross-platform wheel builder (used in release.yml)
+# -----------------------------------------------------------------------------
+[tool.cibuildwheel]
+build = "cp311-* cp312-* cp313-*"
+skip = "*-musllinux_* *-win32"
+test-skip = ""
+test-requires = "pytest pytest-asyncio"
+test-command = "pytest -q {project}/tests"
+before-build = "pip install uv"
+environment = { UV_PROJECT_ENVIRONMENT = "/tmp/venv" }
+manylinux-x86_64-image = "manylinux2024"
+manylinux-aarch64-image = "manylinux2024"
+
+[tool.cibuildwheel.linux]
+repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel}"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src/forgewright", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "PT"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src/forgewright"]
+warn_unused_configs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = [
+  "loguru",
+  "jsonschema",
+  "jsonschema.exceptions",
+  "mcp",
+  "mcp.client",
+  "mcp.client.stdio",
+  "mcp.client.streamable_http",
+  "mcp.client.sse",
+  "mcp.client.session",
+  "mcp.types",
+  "fastmcp",
+  "docker",
+  "docker.errors",
+  "docker.client",
+  "docker.models.containers",
+  "fastapi",
+  "fastapi.*",
+  "uvicorn",
+  "starlette",
+  "starlette.*",
+  "litellm",
+  "litellm.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+  "integration: marks tests as integration (slow, may hit network)",
+  "slow: marks slow tests",
+]
+
+[tool.coverage.run]
+source = ["src/forgewright"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
+
+[tool.interrogate]
+fail-under = 80
+exclude = ["tests", "docs", "build", "dist"]
+ignore-semiprivate = true
+ignore-private = true
+ignore-magic = true

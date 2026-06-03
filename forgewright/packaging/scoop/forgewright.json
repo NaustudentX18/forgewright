@@ -1,0 +1,36 @@
+{
+  "_comment_install": "Install with: scoop bucket add forest https://github.com/forest/scoop-bucket; scoop install forgewright",
+  "_comment_upgrade": "Upgrade with: scoop update; scoop update forgewright",
+  "_comment_uninstall": "Uninstall with: scoop uninstall forgewright",
+  "version": "0.1.0",
+  "description": "An open-source, CLI-first AI agent framework. Bring your own keys, run on your own box.",
+  "homepage": "https://github.com/forest/forgewright",
+  "license": "MIT",
+  "url": "https://files.pythonhosted.org/packages/py3/f/forgewright/forgewright-0.1.0-py3-none-any.whl",
+  "hash": "PLACEHOLDER_CI_REPLACES_REAL_SHA256_OF_WHEL",
+  "bin": "forgewright.exe",
+  "depends": "python",
+  "pre_install": [
+    "python -m pip install --upgrade pip",
+    "python -m venv $dir\\..\\python\\forgewright-venv || python -m venv \"%FORGEWRIGHT_VENV%\""
+  ],
+  "installer": {
+    "file": "forgewright.json",
+    "depends-on": "python"
+  },
+  "notes": [
+    "forgewright installs a Python venv alongside the bucket.",
+    "Run `forgewright init` to write ~/.config/forgewright/.",
+    "Set FORGEWRIGHT_PROVIDER (stub|openai|anthropic) before `forgewright build`."
+  ],
+  "checkver": {
+    "github": "https://github.com/forest/forgewright",
+    "regex": "tag/v([\\d.]+)\""
+  },
+  "autoupdate": {
+    "url": "https://files.pythonhosted.org/packages/py3/f/forgewright/forgewright-$version-py3-none-any.whl",
+    "hash": {
+      "url": "https://pypi.org/pypi/forgewright/$version/json"
+    }
+  }
+}

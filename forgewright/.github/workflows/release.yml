@@ -1,0 +1,279 @@
+name: release
+
+# -----------------------------------------------------------------------------
+# forgewright release pipeline.
+#
+# Triggers:
+#   * push of a tag matching `v*` (e.g. v0.1.0)
+#   * manual `workflow_dispatch` for back-fills or dry-runs
+#
+# Sequence:
+#   build  ->  publish-pypi
+#          ->  sign-wheel
+#          ->  create-gh-release
+#          ->  attest (SLSA build provenance)
+# -----------------------------------------------------------------------------
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Skip the PyPI publish + GitHub release (build + sign only)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write      # OIDC trust for PyPI trusted publishing
+  contents: write      # create tag / release
+  attestations: write  # SLSA build provenance
+  packages: write      # OIDC for cosign keyless signing
+  pull-requests: read
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. build — checkout, build sdist + wheel, generate SBOM
+  # ---------------------------------------------------------------------------
+  build:
+    name: build sdist + wheel + SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install "${{ env.PYTHON_VERSION }}"
+
+      - name: Sync dependencies
+        run: uv sync --locked --all-extras
+
+      - name: Resolve project version
+        id: version
+        run: |
+          # Prefer the git tag, fall back to pyproject metadata.
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(uv run --no-sync python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "[release] resolved version: ${VERSION}"
+
+      - name: Build sdist + wheel
+        run: |
+          set -euo pipefail
+          uv build --out-dir dist/
+          test -n "$(ls -1 dist/*.whl 2>/dev/null)"   || (echo "no wheel"  && exit 1)
+          test -n "$(ls -1 dist/*.tar.gz 2>/dev/null)" || (echo "no sdist" && exit 1)
+          ls -lh dist/
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          set -euo pipefail
+          uv run --with "cyclonedx-bom>=6.5" --with "cyclonedx-python-lib>=8.0" \
+              python -m cyclonedx_py environment \
+                --output-format JSON \
+                --output-file sbom.cdx.json \
+                --spec-version 1.6
+          test -s sbom.cdx.json
+
+      - name: Upload build artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: |
+            dist/
+            sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # 2. publish-pypi — OIDC trusted publishing, no API token required
+  # ---------------------------------------------------------------------------
+  publish-pypi:
+    name: publish to PyPI
+    needs: build
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run != true)
+    environment:
+      name: pypi
+      url: https://pypi.org/p/forgewright
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artefacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          # no `password:` — OIDC is the only auth path here
+          attestations: false   # SLSA attestation is generated separately by `attest`
+
+  # ---------------------------------------------------------------------------
+  # 3. sign-wheel — keyless Sigstore signature of the wheel
+  # ---------------------------------------------------------------------------
+  sign-wheel:
+    name: sign wheel (sigstore)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artefacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          merge-multiple: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign wheel with cosign (keyless)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          WHEEL="$(ls -1 dist/*.whl | head -1)"
+          echo "[sign] signing: ${WHEEL}"
+          cosign sign-blob \
+            --yes \
+            --output-signature "${WHEEL}.sig" \
+            --output-certificate "${WHEEL}.pem" \
+            "${WHEEL}"
+
+      - name: Sign sdist with cosign (keyless)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          SDIST="$(ls -1 dist/*.tar.gz | head -1)"
+          echo "[sign] signing: ${SDIST}"
+          cosign sign-blob \
+            --yes \
+            --output-signature "${SDIST}.sig" \
+            --output-certificate "${SDIST}.pem" \
+            "${SDIST}"
+
+      - name: Upload signatures
+        uses: actions/upload-artifact@v4
+        with:
+          name: signatures
+          path: |
+            dist/*.sig
+            dist/*.pem
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 4. create-gh-release — attach wheel + sdist + SBOM + signatures
+  # ---------------------------------------------------------------------------
+  create-gh-release:
+    name: create GitHub release
+    needs: [build, sign-wheel]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artefacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          merge-multiple: true
+
+      - name: Download signatures
+        uses: actions/download-artifact@v4
+        with:
+          name: signatures
+          path: dist/
+          merge-multiple: true
+
+      - name: Build release body
+        run: |
+          {
+            echo "## forgewright ${GITHUB_REF_NAME#v}"
+            echo
+            echo "**Released:** $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "**Commit:** \`${GITHUB_SHA}\`"
+            echo
+            echo "### Artefacts"
+            echo
+            echo "| File | Description |"
+            echo "|------|-------------|"
+            echo "| \`$(ls dist/*.whl | xargs -n1 basename | head -1)\` | Python wheel |"
+            echo "| \`$(ls dist/*.tar.gz | xargs -n1 basename | head -1)\` | Source distribution |"
+            echo "| \`sbom.cdx.json\` | CycloneDX 1.6 SBOM |"
+            echo "| \`*.sig\` / \`*.pem\` | Sigstore keyless signatures |"
+            echo
+            echo "### Verification"
+            echo
+            echo '```bash'
+            echo "cosign verify-blob \\"
+            echo "  --certificate \"$(ls dist/*.whl).pem\" \\"
+            echo "  --signature \"$(ls dist/*.whl).sig\" \\"
+            echo "  --certificate-identity-regexp 'https://github.com/forest/forgewright' \\"
+            echo "  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \\"
+            echo "  \"$(ls dist/*.whl | head -1)\""
+            echo '```'
+          } > release-body.md
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "forgewright ${{ github.ref_name }}"
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body_path: release-body.md
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/sbom.cdx.json
+            dist/*.sig
+            dist/*.pem
+
+  # ---------------------------------------------------------------------------
+  # 5. attest — SLSA build provenance for the wheel
+  # ---------------------------------------------------------------------------
+  attest:
+    name: SLSA build provenance
+    needs: [build, publish-pypi]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artefacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          merge-multiple: true
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: forgewright
+          subject-path: dist/
+          push-to-registry: false

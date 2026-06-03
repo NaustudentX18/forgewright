@@ -1,0 +1,91 @@
+# forgewright configuration
+# ──────────────────────────────────────────────────────────────────────────────
+# Copy to one of:
+#   • ~/.config/forgewright/config.toml   (user-level)
+#   • ./.forgewright.toml                 (project-level, gitignored)
+#   • forgewright.toml                    (project-level alternative)
+#
+# Precedence (highest wins):
+#   CLI flags > FORGEWRIGHT_* env vars > project config > user config > defaults
+#
+# Tip: store API keys in your OS keyring, not in this file:
+#   forgewright secrets set anthropic   # prompts for the key
+# ──────────────────────────────────────────────────────────────────────────────
+
+[llm]
+# provider = "stub"          # stub | openai | anthropic | google | azure | bedrock | ollama | openrouter
+# model = "stub-model"       # provider-specific model name
+# api_key = "..."            # avoid — use env var or `forgewright secrets set`
+# base_url = "..."           # for ollama, openrouter, or self-hosted gateways
+# max_tokens = 4096
+# temperature = 1.0
+
+# ─── Provider-specific defaults (optional) ───────────────────────────────────
+# [llm.providers.anthropic]
+# default_model = "claude-sonnet-4-6"
+#
+# [llm.providers.openai]
+# default_model = "gpt-5"
+#
+# [llm.providers.ollama]
+# default_model = "qwen2.5-coder:7b"
+# base_url = "http://localhost:11434"
+
+# ─── Sandbox ─────────────────────────────────────────────────────────────────
+# [sandbox]
+# backend = "subprocess"     # subprocess | docker | gvisor
+# mem_limit = "512m"
+# pids_limit = 256
+# network_mode = "none"      # "none" | "bridge" (rarely safe)
+# image = "python:3.12-slim"
+# timeout_s = 30
+
+# ─── Tools ───────────────────────────────────────────────────────────────────
+# [tools]
+# enable = [
+#   "bash",
+#   "str_replace_editor",
+#   "python_execute",
+#   "web_search",
+#   "ask_human",
+#   "terminate",
+#   "browser",
+#   "crawl",
+#   "data_visualization",
+# ]
+# disabled = []
+
+# ─── MCP servers ─────────────────────────────────────────────────────────────
+# [mcp.servers.filesystem]
+# transport = "stdio"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/forest/projects"]
+#
+# [mcp.servers.github]
+# transport = "streamable-http"
+# url = "https://api.github.com/mcp"
+# auth_token_env = "GITHUB_TOKEN"
+#
+# [mcp.servers.fetch]
+# transport = "stdio"
+# command = "uvx"
+# args = ["mcp-server-fetch"]
+
+# ─── Security ────────────────────────────────────────────────────────────────
+# [security]
+# permission_mode = "default"  # default | acceptEdits | plan | auto | dontAsk | bypass
+# audit_log = "~/.local/share/forgewright/audit.jsonl"
+# trust = "~/.config/forgewright/trust.toml"
+
+# ─── Workspace ───────────────────────────────────────────────────────────────
+# workspace = "./workspace"
+# logs = "./logs"
+# log_level = "INFO"          # TRACE | DEBUG | INFO | WARNING | ERROR
+# max_steps = 8
+
+# ─── Runflow (PlanningFlow + multi-agent) ────────────────────────────────────
+# [runflow]
+# enable_data_analysis = true
+# enable_browser_agent = true
+# enable_mcp_agent = true
+# timeout_s = 3600

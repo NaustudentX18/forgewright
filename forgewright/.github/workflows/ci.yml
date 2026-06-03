@@ -1,0 +1,141 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: lint + mypy + pytest (${{ matrix.os }} / py${{ matrix.python }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          python-version: ${{ matrix.python }}
+
+      - name: Set up Python
+        run: uv python install ${{ matrix.python }}
+
+      - name: Sync dependencies
+        run: uv sync --locked --all-extras
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Format check (ruff)
+        run: uv run ruff format --check .
+
+      - name: Type check (mypy)
+        run: uv run mypy src
+
+      - name: Test (pytest)
+        run: uv run pytest -q
+
+  security:
+    name: security (pip-audit + gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: pip-audit
+        run: uv run pip-audit --strict
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-sdist-wheel:
+    name: build sdist + wheel
+    needs: [test, security]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Sync dependencies
+        run: uv sync --locked --all-extras
+
+      - name: Build sdist + wheel
+        run: uv build --out-dir dist/
+
+      - name: Verify build artefacts
+        run: |
+          set -e
+          test -n "$(ls -1 dist/*.whl 2>/dev/null)"   || (echo "no wheel produced"  && exit 1)
+          test -n "$(ls -1 dist/*.tar.gz 2>/dev/null)" || (echo "no sdist produced" && exit 1)
+          ls -lh dist/
+
+      - name: Upload build artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  sbom:
+    name: SBOM (CycloneDX)
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Sync dependencies
+        run: uv sync --locked --all-extras
+
+      - name: Generate CycloneDX SBOM
+        # `cyclonedx-py environment` introspects the current Python env
+        # and emits a CycloneDX 1.6 JSON SBOM. We pin via `uv run --with`
+        # to avoid mutating the project venv.
+        run: |
+          uv run --with "cyclonedx-bom>=6.5" --with "cyclonedx-python-lib>=8.0" \
+              python -m cyclonedx_py environment \
+                --output-format JSON \
+                --output-file sbom.cdx.json \
+                --spec-version 1.6
+          test -s sbom.cdx.json
+          head -c 200 sbom.cdx.json
+          echo
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 30

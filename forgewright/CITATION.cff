@@ -1,0 +1,60 @@
+cff-version: 1.2.0
+message: |
+  If you use forgewright in academic work, please cite the version you used.
+  The `preferred-citation` block below is the canonical entry for v0.1.0;
+  the top-level `authors` / `title` / `date-released` reflect the most
+  recent tagged release. A BibTeX entry is included for convenience.
+type: software
+title: forgewright
+abstract: |
+  forgewright is an open-source, CLI-first AI agent framework for developers
+  who'd rather own their stack than rent someone else's. It is the open-source
+  answer to Manus AI and Lovable, providing a multi-LLM, multi-agent,
+  sandbox-by-default framework under the MIT license.
+authors:
+  - family-names: Pi
+    given-names: Forest
+    alias: forest
+date-released: 2026-06-02
+version: 0.1.0
+license: MIT
+license-url: https://github.com/forest/forgewright/blob/main/LICENSE
+repository-code: https://github.com/forest/forgewright
+repository: https://github.com/forest/forgewright
+homepage: https://forgewright.dev
+keywords:
+  - ai
+  - agent
+  - llm
+  - cli
+  - mcp
+  - open-source
+  - byo-keys
+  - sandbox
+  - audit-log
+contact:
+  - email: hello@forgewright.dev
+references:
+  - type: software
+    title: forgewright
+    notes: |
+      Released under the MIT license. Source available at
+      https://github.com/forest/forgewright. Cite the version you used;
+      pin the commit SHA in your methods section for reproducibility.
+preferred-citation:
+  type: software
+  title: forgewright v0.1.0 — The open-source, CLI-first AI agent framework
+  authors:
+    - family-names: Pi
+      given-names: Forest
+      alias: forest
+  year: 2026
+  month: 6
+  day: 2
+  version: 0.1.0
+  doi: 10.5281/zenodo.placeholder
+  url: https://github.com/forest/forgewright
+  notes: |
+    Cite this entry when referencing forgewright v0.1.0 specifically.
+    For the latest release, regenerate the citation from the corresponding
+    `CITATION.cff` on the release tag.

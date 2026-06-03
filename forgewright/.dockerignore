@@ -1,0 +1,83 @@
+# Build context hygiene — keep the image-build context tiny and reproducible.
+# See https://docs.docker.com/engine/reference/builder/#dockerignore-file
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# Virtualenvs
+.venv
+venv
+env
+.python-version
+
+# Python bytecode / caches
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.uv-cache
+.cache
+
+# Build / dist
+dist
+build
+*.egg-info
+*.egg
+wheelhouse
+.sdist
+
+# Node (just in case)
+node_modules
+.npm
+.yarn
+
+# Tooling config we don't need in the build context
+.claude
+.codegraph
+.codewhale
+.aider*
+.cx-hook-watchdog.log
+.health-check.log
+
+# CI workflows (large, not needed at build time; keep Dockerfile imports minimal)
+# (Uncomment if your build context ever balloons.)
+# .github
+
+# Tests (we install pytest as a dep, but don't need sources in the runtime image)
+tests
+
+# Heavy / non-essential docs
+docs/RESEARCH.md
+
+# Editor / OS junk
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Demos / media
+*.cast
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.webm
+*.gif
+
+# Secrets / local config
+.env
+.envrc
+secrets.toml
+*.local.toml
+config.local.toml
+*.audit.jsonl
+.forgewright
