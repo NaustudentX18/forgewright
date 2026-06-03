@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#020617" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="forgewright">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="description" content="forgewright — open-source, CLI-first AI agent. Bring your own keys.">
+<title>forgewright</title>
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+<link rel="mask-icon" href="/static/icon-maskable-512.png" color="#020617">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+
+:root {
+  color-scheme: dark;
+  --color-primary: #0F172A; --color-secondary: #1E293B;
+  --color-cta: #22C55E; --color-background: #020617;
+  --color-text: #F8FAFC; --color-text-dim: #94A3B8;
+  --color-surface: #0B1220; --color-border: #1E293B;
+  --color-error: #EF4444;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --topbar-h: 56px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; background: var(--color-background); color: var(--color-text); font: 450 15px/1.5 var(--font-sans); -webkit-font-smoothing: antialiased; }
+.icon-btn { background: transparent; border: 0; color: var(--color-text-dim); width: 40px; height: 40px; border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div class="scrim" id="scrim" hidden></div>
+
+  <aside class="sidebar" id="sidebar" aria-label="Sessions">
+    <div class="sidebar-head">
+      <span class="brand">forgewright</span>
+      <button class="icon-btn small" id="closeSidebar" type="button" aria-label="Close sessions">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <button class="new-chat-btn" id="newChatSidebar" type="button" aria-label="Start a new chat">
+      <span class="new-chat-glyph" aria-hidden="true">+</span>
+      <span>New chat</span>
+    </button>
+    <div class="session-list" id="sessionList" role="list">
+      <p class="session-empty">No chats yet — start one!</p>
+    </div>
+  </aside>
+
+  <header class="topbar">
+    <button class="icon-btn hamburger" id="openSidebar" type="button" aria-label="Open sessions">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <h1 class="title" id="title">New chat</h1>
+    <div class="connection-pill" id="connectionPill" data-state="online" title="Connection status">
+      <span class="dot"></span><span class="label">Online</span>
+    </div>
+    <button class="icon-btn" id="settingsBtn" type="button" aria-label="Settings">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+    <button class="icon-btn primary" id="newChat" type="button" aria-label="New chat" title="New chat">
+      <span class="new-chat-glyph" aria-hidden="true">+</span>
+    </button>
+  </header>
+
+  <main class="messages" id="messages" role="log" aria-live="polite" aria-label="Conversation">
+    <div class="empty-state" id="emptyState">
+      <div class="wordmark" aria-hidden="true"><span class="prompt-char">&gt;</span>forgewright</div>
+      <p class="tagline">Bring your own keys. Forge agents in your terminal — and now, in your pocket.</p>
+      <ul class="chips" aria-label="Example prompts">
+        <li role="listitem"><button class="chip" type="button" data-prompt="List the files in my home directory"><span class="chip-prefix">$</span><span class="chip-text">List the files in my home directory</span></button></li>
+        <li role="listitem"><button class="chip" type="button" data-prompt="What's the weather in Tokyo?"><span class="chip-prefix">$</span><span class="chip-text">What's the weather in Tokyo?</span></button></li>
+        <li role="listitem"><button class="chip" type="button" data-prompt="Refactor auth.py for readability"><span class="chip-prefix">$</span><span class="chip-text">Refactor auth.py for readability</span></button></li>
+        <li role="listitem"><button class="chip" type="button" data-prompt="Summarize the last 24 hours of my git log"><span class="chip-prefix">$</span><span class="chip-text">Summarize the last 24 hours of my git log</span></button></li>
+      </ul>
+    </div>
+  </main>
+
+  <form class="composer" id="composer" autocomplete="off">
+    <label for="input" class="visually-hidden">Message</label>
+    <div class="input-wrap">
+      <textarea
+        id="input"
+        class="input"
+        rows="1"
+        placeholder="Type a message…"
+        enterkeyhint="send"
+        spellcheck="true"
+        aria-label="Message"
+      ></textarea>
+      <button class="send-btn" id="send" type="submit" aria-label="Send message" title="Send (Enter)">
+        <span class="send-glyph" aria-hidden="true">&gt;</span>
+        <span class="send-label">Send</span>
+      </button>
+    </div>
+    <p class="hint">Press <kbd>Enter</kbd> to send, <kbd>Shift</kbd>+<kbd>Enter</kbd> for newline · <kbd>/</kbd> to focus</p>
+  </form>
+
+  <div class="toast" id="toast" hidden role="alert" aria-live="assertive">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+    <span class="toast-msg"></span>
+  </div>
+
+  <dialog class="settings-modal" id="settingsModal" aria-label="Settings">
+    <div class="settings-head">
+      <span>Settings</span>
+      <button class="icon-btn small" type="button" data-close aria-label="Close">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="settings-body">
+      <div class="setting-row">
+        <span class="setting-label">Provider</span>
+        <span class="setting-value" id="settingsProvider">&mdash;</span>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Model</span>
+        <span class="setting-value" id="settingsModel">&mdash;</span>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Status</span>
+        <span class="setting-value" id="settingsStatus">&mdash;</span>
+      </div>
+      <p class="settings-note">Settings panel is read-only. Real configuration lives in <code>~/.config/forgewright/</code>.</p>
+    </div>
+  </dialog>
+</div>
+<script src="/static/app.js" defer></script>
+</body>
+</html>
