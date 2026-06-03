@@ -232,12 +232,13 @@ class TestComponents:
 class TestStaticHygiene:
     """Payload budget, no webfont CDN, no emoji codepoints."""
 
-    PAYLOAD_BUDGET = 55 * 1024  # 55 KB — bumped from 50 KB to accommodate
-    # the PWA install banner + SW registration in app.js (see the [Unreleased]
-    # section of CHANGELOG.md). Anything beyond 55 KB needs a real perf review.
+    PAYLOAD_BUDGET = 60 * 1024  # 60 KB — bumped from 55 KB to accommodate
+    # the inline critical-CSS in index.html that wins the external-CSS
+    # load race on first paint (see [Unreleased] in CHANGELOG.md).
+    # Anything beyond 60 KB needs a real perf review.
 
-    def test_payload_under_55kb(self) -> None:
-        """The combined static payload must stay under 55 KB."""
+    def test_payload_under_60kb(self) -> None:
+        """The combined static payload must stay under 60 KB."""
         total = 0
         for path in (INDEX, CSS, JS):
             total += path.stat().st_size

@@ -361,11 +361,15 @@ def test_css_uses_safe_area_insets(tmp_path: Path) -> None:
     assert "100dvh" in text
 
 
-def test_static_payload_under_55kb() -> None:
-    """HTML + CSS + JS combined is below the 55 KB mobile budget.
+def test_static_payload_under_60kb() -> None:
+    """HTML + CSS + JS combined is below the 60 KB mobile budget.
 
-    Bumped from 50 KB when the PWA install banner + SW registration
-    landed in app.js — see [Unreleased] in CHANGELOG.md.
+    Bumped from 50 KB → 55 KB when the PWA install banner + SW
+    registration landed in app.js, then 55 KB → 60 KB when the inline
+    critical-CSS in index.html was added to win the external-CSS load
+    race on first paint. The PWA was rendering unstyled for one paint
+    on a fast 3G connection because the external stylesheet hadn't
+    loaded by first contentful paint. See [Unreleased] in CHANGELOG.md.
     """
     static = Path(__file__).resolve().parents[3] / "src/forgewright/web/static"
     total = (
@@ -373,7 +377,7 @@ def test_static_payload_under_55kb() -> None:
         + (static / "style.css").stat().st_size
         + (static / "app.js").stat().st_size
     )
-    assert total < 55_000, f"static payload is {total} bytes (limit 55000)"
+    assert total < 60_000, f"static payload is {total} bytes (limit 60000)"
 
 
 def test_manifest_endpoint_returns_pwa_manifest(client: TestClient) -> None:
