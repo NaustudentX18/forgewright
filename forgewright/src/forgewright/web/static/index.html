@@ -36,6 +36,9 @@
 html, body { margin: 0; padding: 0; height: 100%; background: var(--color-background); color: var(--color-text); font: 450 15px/1.5 var(--font-sans); -webkit-font-smoothing: antialiased; }
 .icon-btn { background: transparent; border: 0; color: var(--color-text-dim); width: 40px; height: 40px; border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.stop-btn { background: var(--color-error); color: #fff; border: 0; border-radius: 10px; padding: 0 14px; height: 40px; min-width: 80px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font: 600 14px/1 var(--font-sans); }
+.stop-btn:hover { filter: brightness(1.1); }
+.stop-btn .stop-glyph { font-size: 12px; line-height: 1; }
 </style>
 </head>
 <body>
@@ -102,6 +105,10 @@ html, body { margin: 0; padding: 0; height: 100%; background: var(--color-backgr
       <button class="send-btn" id="send" type="submit" aria-label="Send message" title="Send (Enter)">
         <span class="send-glyph" aria-hidden="true">&gt;</span>
         <span class="send-label">Send</span>
+      </button>
+      <button class="stop-btn" id="stop" type="button" hidden aria-label="Stop generation" title="Stop">
+        <span class="stop-glyph" aria-hidden="true">■</span>
+        <span class="stop-label">Stop</span>
       </button>
     </div>
     <p class="hint">Press <kbd>Enter</kbd> to send, <kbd>Shift</kbd>+<kbd>Enter</kbd> for newline · <kbd>/</kbd> to focus</p>

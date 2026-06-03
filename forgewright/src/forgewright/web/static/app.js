@@ -500,6 +500,8 @@
     if (!text || state.sending) return;
     state.sending = true;
     sendBtn.disabled = true;
+    sendBtn.setAttribute("hidden", "");
+    stopBtn.removeAttribute("hidden");
     sendBtn.classList.add("sent");
     setTimeout(function () { sendBtn.classList.remove("sent"); }, 700);
     addMessage("user", text);
@@ -608,6 +610,8 @@
   function finish() {
     state.sending = false;
     sendBtn.disabled = false;
+    sendBtn.removeAttribute("hidden");
+    stopBtn.setAttribute("hidden", "");
     state.abortCtrl = null;
   }
   document.querySelectorAll(".chip").forEach(function (chip) {
@@ -623,6 +627,28 @@
   });
   loadSessions();
   showEmpty();
+
+  // Stop / cancel — POST to the abort endpoint when the user clicks
+  // the red button during an in-flight run. The server emits
+  // `event: error` with `{"message": "aborted"}` which the existing
+  // SSE consumer handles; we just need to wire the click.
+  if (stopBtn) {
+    stopBtn.addEventListener("click", function () {
+      if (!state.sending || !state.sessionId) return;
+      var sid = state.sessionId;
+      // Fire-and-forget; the server's 204 is the ack we care about.
+      // The streaming consumer will see the error event and tear down.
+      postJson("/api/sessions/" + sid + "/abort", {}).catch(function (err) {
+        console.warn("abort.post.failed", err);
+      });
+      // Optimistically flip UI so the user gets instant feedback even
+      // before the server's error event round-trips.
+      state.sending = false;
+      sendBtn.removeAttribute("hidden");
+      stopBtn.setAttribute("hidden", "");
+      sendBtn.disabled = false;
+    });
+  }
 
   // --- PWA: service worker registration + install prompt ----------------
   // Keeps a home-screen install path alive on Android (beforeinstallprompt)

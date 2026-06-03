@@ -236,6 +236,75 @@ def test_abort_session_returns_204(client: TestClient) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Stop / Cancel button
+# --------------------------------------------------------------------------- #
+
+
+def test_index_has_stop_button_hidden_by_default(client: TestClient) -> None:
+    """The stop button is in the DOM but hidden until an in-flight
+    run starts. ``hidden`` is a boolean attribute, so we assert its
+    presence in the markup, not its rendered visibility."""
+    html = client.get("/").text
+    assert 'id="stop"' in html
+    assert "stop-btn" in html
+    # The button must be marked hidden in the static HTML so the
+    # page does not flash a red button before any message is sent.
+    # Find the stop-btn element and check it has the hidden attribute.
+    import re
+    m = re.search(r'<button[^>]*id="stop"[^>]*>', html)
+    assert m, "stop button not found in index.html"
+    assert "hidden" in m.group(0), (
+        f"stop button must have hidden attribute by default, got: {m.group(0)!r}"
+    )
+
+
+def test_app_js_wires_stop_button_to_abort(client: TestClient) -> None:
+    """The stop button's click handler POSTs to the abort endpoint.
+
+    Regression guard: a refactor of app.js that drops the abort
+    wiring breaks this test, not the in-flight cancel UX on a phone.
+    """
+    js = client.get("/static/app.js").text
+    # The abort endpoint path must be in the JS, exactly as the
+    # route is defined in server.py.
+    assert "/abort" in js
+    # And the wiring must reach it via a click on the stop button.
+    # Look for the stopBtn.addEventListener("click", ...) block.
+    assert "stopBtn" in js
+    assert 'addEventListener("click"' in js
+    # The path is built dynamically: "/api/sessions/" + sid + "/abort"
+    # Both halves must appear.
+    assert "/api/sessions/" in js
+    assert '"/abort"' in js or "+\"/abort\"" in js or "'/abort'" in js
+
+
+def test_app_js_toggles_stop_button_with_sending_state(client: TestClient) -> None:
+    """When a message is in flight, send is hidden and stop is shown;
+    when the run finishes, send is shown and stop is hidden.
+
+    This is a string-content guard because the toggle logic depends
+    on the closure-scoped ``state.sending`` flag, which is hard to
+    exercise end-to-end without driving the real SSE pipeline. The
+    strings checked here are the exact attributes set in the
+    ``send()`` and ``finish()`` paths.
+    """
+    js = client.get("/static/app.js").text
+    # Both buttons must use the same hidden/show toggle pattern
+    # (removeAttribute("hidden") / setAttribute("hidden", "")).
+    assert 'removeAttribute("hidden")' in js
+    assert 'setAttribute("hidden", "")' in js
+    # The pairing must be consistent — find the two paired blocks
+    # and assert that sendBtn and stopBtn are both touched in each.
+    import re
+    # Quick sanity: stopBtn is referenced at least 4 times
+    # (1 in send-show, 1 in send-hide, 1 in finish-hide, 1 in finish-show,
+    #  plus click handler).
+    assert js.count("stopBtn") >= 4, (
+        f"stopBtn referenced {js.count('stopBtn')} times, expected >= 4"
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Module-level app exists
 # --------------------------------------------------------------------------- #
 

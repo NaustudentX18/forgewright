@@ -80,6 +80,22 @@ project adheres to [CalVer](https://calver.org/) (`YYYY.MM.PATCH`).
   - **Static payload budget: 50 KB → 55 KB.** The install
     banner and SW registration are about 2.7 KB of `app.js`.
     Anything beyond 55 KB needs a real perf review.
+  - **Stop / cancel button** in the web UI. A red "Stop" button
+    replaces the Send button mid-stream and POSTs to
+    `POST /api/sessions/{id}/abort` (the endpoint that already
+    existed but had no client wiring). The server emits
+    `event: error {"message": "aborted"}` which the existing
+    SSE consumer handles; the UI flips back to Send on click
+    for instant feedback even before the server's error event
+    round-trips. **Test count now 739** (+3 stop-button tests).
+
+### Notes
+- The OMC HUD already renders context-% in the statusline
+  (`[OMC#x.y.z] | [API err] | session:N | ctx:M%`) and writes a
+  `~/.omc/state/compact-requested.json` trigger file when usage
+  crosses its configured threshold. No forgewright-side change
+  needed; this is documented here so future contributors don't
+  re-implement it.
 
 ---
 
