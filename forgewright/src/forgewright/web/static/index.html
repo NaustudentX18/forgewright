@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="forgewright">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="description" content="forgewright — open-source, CLI-first AI agent. Bring your own keys.">
+<meta name="description" content="forgewright — CLI-first AI agent. BYOK.">
 <title>forgewright</title>
 <link rel="manifest" href="/static/manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
@@ -115,7 +115,7 @@ html, body { margin: 0; padding: 0; height: 100%; background: var(--color-backgr
   <main class="messages" id="messages" role="log" aria-live="polite" aria-label="Conversation">
     <div class="empty-state" id="emptyState">
       <div class="wordmark" aria-hidden="true"><span class="prompt-char">&gt;</span>forgewright</div>
-      <p class="tagline">Bring your own keys. Forge agents in your terminal — and now, in your pocket.</p>
+      <p class="tagline">BYOK. Forge agents in your terminal — and in your pocket.</p>
       <ul class="chips" aria-label="Example prompts">
         <li role="listitem"><button class="chip" type="button" data-prompt="List the files in my home directory"><span class="chip-prefix">$</span><span class="chip-text">List the files in my home directory</span></button></li>
         <li role="listitem"><button class="chip" type="button" data-prompt="What's the weather in Tokyo?"><span class="chip-prefix">$</span><span class="chip-text">What's the weather in Tokyo?</span></button></li>
@@ -146,7 +146,7 @@ html, body { margin: 0; padding: 0; height: 100%; background: var(--color-backgr
         <span class="stop-label">Stop</span>
       </button>
     </div>
-    <p class="hint">Press <kbd>Enter</kbd> to send, <kbd>Shift</kbd>+<kbd>Enter</kbd> for newline · <kbd>/</kbd> to focus</p>
+    <p class="hint"><kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> newline · <kbd>/</kbd> focus</p>
   </form>
 
   <div class="toast" id="toast" hidden role="alert" aria-live="assertive">

@@ -70,6 +70,32 @@ async def test_list_known_servers_handles_http_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_known_servers_normalizes_nested_entries() -> None:
+    """Registry v0 wraps each server in a ``server`` + ``_meta`` envelope."""
+    nested = {
+        "name": "ai.adeu/adeu",
+        "packages": [{"registryType": "npm", "identifier": "@adeu/mcp-server"}],
+    }
+    with patch("httpx.AsyncClient") as Client:
+        ctx = MagicMock()
+        response = MagicMock()
+        response.raise_for_status = MagicMock()
+        response.json.return_value = {
+            "servers": [{"server": nested, "_meta": {}}],
+            "metadata": {},
+        }
+        ctx.get = AsyncMock(return_value=response)
+        ctx.__aenter__ = AsyncMock(return_value=ctx)
+        ctx.__aexit__ = AsyncMock(return_value=None)
+        Client.return_value = ctx
+
+        result = await list_known_servers()
+
+    assert len(result) == 1
+    assert result[0]["name"] == "ai.adeu/adeu"
+
+
+@pytest.mark.asyncio
 async def test_list_known_servers_handles_unexpected_shape() -> None:
     """A non-dict response body returns ``[]`` (defensive)."""
     with patch("httpx.AsyncClient") as Client:

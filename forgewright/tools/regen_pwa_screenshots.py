@@ -27,7 +27,7 @@ OUT = STATIC / "screenshots"
 
 def _placeholder_png(path: Path, width: int, height: int) -> None:
     """Write a minimal branded placeholder when Playwright is unavailable."""
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
 
     img = Image.new("RGB", (width, height), "#020617")
     draw = ImageDraw.Draw(img)

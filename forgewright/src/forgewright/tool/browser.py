@@ -240,13 +240,15 @@ class BrowserUseTool(BaseTool):
         )
 
     async def _action_extract(self) -> ToolResult:
-        """Return a compact accessibility-tree snapshot of the current page."""
+        """Return a compact accessibility snapshot of the current page.
+
+        Uses Playwright's aria snapshot (``page.aria_snapshot``) instead of
+        scraping ``document.body.innerText``, which misses structure and blows
+        up token use on JS-heavy sites. Older Playwright builds fall back to
+        the deprecated ``page.accessibility.snapshot()`` JSON tree.
+        """
         page = await self._require_page()
-        # `accessibility.snapshot()` may be None on a fully empty page; coerce
-        # to an empty dict so `_render_snapshot` still produces valid output.
-        # `page.accessibility` is a sync proxy in the Playwright Python API.
-        snapshot_obj = await page.accessibility.snapshot()  # type: ignore[attr-defined]
-        text = _render_snapshot(snapshot_obj or {})
+        text = await _extract_page_text(page)
         if len(text) > _MAX_TEXT_CHARS:
             text = text[:_MAX_TEXT_CHARS] + "\n... [truncated]"
         return ToolResult(output=text)
@@ -288,6 +290,26 @@ class BrowserUseTool(BaseTool):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+async def _extract_page_text(page: Any) -> str:
+    """Return LLM-readable page text from Playwright's accessibility APIs."""
+    aria_snapshot = getattr(page, "aria_snapshot", None)
+    if callable(aria_snapshot):
+        # Playwright 1.49+: `accessibility.snapshot()` was removed in favor of
+        # YAML-like aria snapshots. `mode="ai"` includes element refs for tools.
+        return await page.aria_snapshot(mode="ai")  # type: ignore[call-arg]
+
+    accessibility = getattr(page, "accessibility", None)
+    if accessibility is None:
+        raise RuntimeError(
+            "Playwright page exposes neither aria_snapshot nor accessibility.snapshot"
+        )
+    snapshot_fn = accessibility.snapshot
+    snapshot_obj = snapshot_fn()
+    if hasattr(snapshot_obj, "__await__"):
+        snapshot_obj = await snapshot_obj
+    return _render_snapshot(snapshot_obj or {})
 
 
 def _render_snapshot(node: Any, depth: int = 0) -> str:

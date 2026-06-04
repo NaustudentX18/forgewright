@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from forgewright.mcp.client import MCPClient, MCPServerConfig, MCPTransport
 from forgewright.mcp.proxy import MCPToolProxy, _MCPToolSpec, discover_proxies, make_proxy
-from forgewright.mcp.registry import list_known_servers
+from forgewright.mcp.registry import install_server, list_known_servers
 from forgewright.mcp.server import serve
 
 __all__ = [
@@ -21,6 +21,7 @@ __all__ = [
     "MCPTransport",
     "_MCPToolSpec",
     "discover_proxies",
+    "install_server",
     "list_known_servers",
     "make_proxy",
     "serve",

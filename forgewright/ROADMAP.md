@@ -84,18 +84,16 @@ The full BUILD_PLAN §3-§11. 617 unit tests, 0 regressions.
 - ~~**Mobile-share target**~~ — **Shipped:** manifest `share_target` →
   `/share-in`, server redirect + SW POST handler, composer prefill for
   AskHuman-style context (URL/text/attachment metadata).
-- **MCP registry client** — `forgewright mcp install <name>` against
-  `registry.modelcontextprotocol.io` (the spec landed in 2025-Q4). Today
-  the install path is hand-written.
-- **Real Playwright a11y tree** — `page.accessibility.snapshot()` instead
-  of `innerText` for the Browser tool. Big cost win on JS-heavy sites.
-- **Tiktoken-free token counting** for non-OpenAI providers. Pull
-  `client.messages.count_tokens` for Anthropic, fall back to a
-  characters÷4 heuristic for the rest.
+- ~~**MCP registry client**~~ — **Shipped:** `forgewright mcp install <name>`
+  fetches `registry.modelcontextprotocol.io`, writes `~/.config/forgewright/mcp.json`.
+- ~~**Real Playwright a11y tree**~~ — **Shipped:** `browser` `extract` uses
+  `page.aria_snapshot(mode="ai")` (Playwright 1.49+; legacy snapshot fallback).
+- ~~**Tiktoken-free token counting**~~ — **Shipped:** `llm/token_count.py`
+  (OpenAI/Azure tiktoken, Anthropic `count_tokens`, else chars÷4).
 - **Windows wheels** — cibuildwheel matrix grows to include
   `*-win64`. ARM64 Windows still out.
-- **Audit log query tool** — `forgewright audit query "tool=bash AND
-  approved=false"`. Today the log is write-and-verify; read-side is grep.
+- ~~**Audit log query tool**~~ — **Shipped:** `forgewright audit query
+  "tool=bash AND approved=false"`.
 
 ### v0.3 — *Multi-agent workflows* (target 2026-08)
 

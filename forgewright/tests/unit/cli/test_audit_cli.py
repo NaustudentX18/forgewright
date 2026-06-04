@@ -126,6 +126,7 @@ def test_audit_help_lists_subactions() -> None:
     assert "verify" in out
     assert "tail" in out
     assert "export" in out
+    assert "query" in out
 
 
 def test_audit_unknown_action_exits_2(tmp_path: Path) -> None:
@@ -288,6 +289,64 @@ def test_audit_export_to_output_file(tmp_path: Path) -> None:
     assert contents.count("\n") == 2
     assert "s-0" in contents
     assert "s-1" in contents
+
+
+def _seed_audit_with_consent(path: Path) -> None:
+    """Write events with approval metadata for query tests."""
+    log = AuditLog(path)
+    log.append(
+        AuditEvent(
+            session_id="approved-yes",
+            type="tool",
+            tool="Bash",
+            user_consent={"approved": True},
+        )
+    )
+    log.append(
+        AuditEvent(
+            session_id="approved-no",
+            type="tool",
+            tool="Bash",
+            user_consent={"approved": False},
+        )
+    )
+
+
+def test_audit_query_filters_jsonl_stdout(tmp_path: Path) -> None:
+    """``audit query`` prints matching events as JSONL."""
+    path = tmp_path / "query.jsonl"
+    _seed_audit_with_consent(path)
+
+    result = runner.invoke(
+        app,
+        ["audit", "query", "tool=bash AND approved=false", "--log", str(path)],
+    )
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    assert len(lines) == 1
+    obj = json.loads(lines[0])
+    assert obj["session_id"] == "approved-no"
+
+
+def test_audit_query_missing_expression_exits_2(tmp_path: Path) -> None:
+    """``audit query`` without an expression returns exit code 2."""
+    path = tmp_path / "q.jsonl"
+    path.touch()
+    result = runner.invoke(app, ["audit", "query", "--log", str(path)])
+    assert result.exit_code == 2
+
+
+def test_audit_query_invalid_syntax_exits_2(tmp_path: Path) -> None:
+    """Malformed query expressions return exit code 2."""
+    path = tmp_path / "q.jsonl"
+    _seed_audit(path, n=1)
+    result = runner.invoke(
+        app,
+        ["audit", "query", "not-a-clause", "--log", str(path)],
+    )
+    assert result.exit_code == 2
+    out = result.stdout + (result.stderr or "")
+    assert "Invalid query" in out
 
 
 def test_audit_export_unknown_format_exits_2(tmp_path: Path) -> None:

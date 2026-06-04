@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from forgewright.logger import logger
+from forgewright.security.audit_query import event_matches_query, parse_audit_query
 
 __all__ = ["AuditEvent", "AuditLog", "AuditVerifyResult"]
 
@@ -233,6 +234,15 @@ class AuditLog:
         if n <= 0:
             return []
         return list(self._events[-n:])
+
+    def query(self, expr: str) -> list[AuditEvent]:
+        """Return events matching a simple ``field=value [AND ...]`` expression."""
+        clauses = parse_audit_query(expr)
+        return [
+            ev
+            for ev in self._events
+            if event_matches_query(ev.to_dict(include_hash=True), clauses)
+        ]
 
     def __len__(self) -> int:
         return len(self._events)

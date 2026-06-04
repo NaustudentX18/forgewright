@@ -7,10 +7,12 @@ Sub-actions:
 * ``tail``   — print the last N events in a Rich table.
 * ``export`` — write the log to stdout (or ``--output``) as ``jsonl``
   or ``csv``.
+* ``query``  — filter events with ``field=value [AND ...]`` (jsonl to stdout).
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from typing import Literal
 
@@ -27,14 +29,21 @@ console = Console()
 __all__ = ["audit_command"]
 
 
-_AuditAction = Literal["verify", "tail", "export"]
+_AuditAction = Literal["verify", "tail", "export", "query"]
 _AuditFormat = Literal["jsonl", "csv"]
 
 
 def audit_command(
     action: str = typer.Argument(
         ...,
-        help="Sub-action: verify | tail | export.",
+        help="Sub-action: verify | tail | export | query.",
+    ),
+    query_expr: str | None = typer.Argument(
+        None,
+        help=(
+            "Filter expression for 'query', e.g. "
+            '"tool=bash AND approved=false".'
+        ),
     ),
     log_path: str | None = typer.Option(
         None,
@@ -82,7 +91,16 @@ def audit_command(
         _run_export(resolved_path, fmt=fmt, output=output)
         return
 
-    console.print(f"[red]Unknown action: {action!r}[/red] (expected: verify | tail | export)")
+    if action == "query":
+        if not query_expr:
+            console.print("[red]Missing query expression[/red] (e.g. tool=Bash AND approved=false)")
+            raise typer.Exit(2)
+        _run_query(resolved_path, query_expr)
+        return
+
+    console.print(
+        f"[red]Unknown action: {action!r}[/red] (expected: verify | tail | export | query)"
+    )
     raise typer.Exit(2)
 
 
@@ -155,4 +173,23 @@ def _run_export(path: str, fmt: str, output: str | None) -> None:
     if not payload.endswith("\n"):
         payload += "\n"
     sys.stdout.write(payload)
+    sys.stdout.flush()
+
+
+def _run_query(path: str, expr: str) -> None:
+    """Filter the log and print matching events as JSONL on stdout."""
+    log = AuditLog(path)
+    try:
+        events = log.query(expr)
+    except ValueError as exc:
+        console.print(f"[red]Invalid query:[/red] {exc}")
+        raise typer.Exit(2) from exc
+
+    if not events:
+        console.print(f"[dim]No matching events at {path}[/dim]")
+        return
+
+    for ev in events:
+        line = json.dumps(ev.to_dict(include_hash=True), ensure_ascii=False)
+        sys.stdout.write(line + "\n")
     sys.stdout.flush()

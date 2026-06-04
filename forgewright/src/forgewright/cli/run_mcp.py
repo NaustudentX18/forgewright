@@ -4,7 +4,9 @@ Subcommands:
 
 * ``serve`` — start the FastMCP server (stdio or streamable-http).
 * ``connect`` — connect to a remote MCP server, list its tools, exit.
-* ``ls`` / ``install`` / ``trust`` — placeholders for v0.2.
+* ``install <name>`` — resolve a server from the public MCP registry and
+  write ``~/.config/forgewright/mcp.json``.
+* ``ls`` / ``trust`` — placeholders for v0.2.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from rich.table import Table
 
 from forgewright.logger import logger
 from forgewright.mcp.client import MCPClient, MCPServerConfig, MCPTransport
+from forgewright.mcp.registry import install_server
 
 console = Console()
 
@@ -27,6 +30,10 @@ def mcp_command(
     action: str = typer.Argument(
         ...,
         help="Sub-action: serve | connect | ls | install | trust.",
+    ),
+    server_name: str | None = typer.Argument(
+        None,
+        help="Registry server name for `install` (e.g. postgres, ai.adeu/adeu).",
     ),
     transport: str = typer.Option(
         "stdio",
@@ -69,12 +76,47 @@ def mcp_command(
         asyncio.run(_connect_and_list(server_id, transport, command, url))
         return
 
-    if action in ("ls", "install", "trust"):
+    if action == "install":
+        asyncio.run(_run_install(server_name))
+        return
+
+    if action in ("ls", "trust"):
         console.print("[yellow]Not implemented in v0.1 (lands in v0.2)[/yellow]")
         raise typer.Exit(0)
 
     console.print(f"[red]Unknown action: {action}[/red]")
     raise typer.Exit(2)
+
+
+async def _run_install(server_name: str | None) -> None:
+    """Fetch the registry, resolve the server, write or print install config."""
+    if not server_name:
+        console.print(
+            "[red]`install` requires a server name "
+            "(e.g. `forgewright mcp install postgres`)[/red]"
+        )
+        raise typer.Exit(2)
+
+    result = await install_server(server_name)
+    if result is None:
+        console.print(f"[red]No registry server matched {server_name!r}[/red]")
+        raise typer.Exit(1)
+
+    if result.instructions and not result.toml_section:
+        console.print(f"[yellow]{result.instructions}[/yellow]")
+        raise typer.Exit(1)
+
+    console.print(
+        f"[green]✓[/green] Resolved [cyan]{result.registry_name}[/cyan] "
+        f"as [bold]mcp.servers.{result.server_id}[/bold]"
+    )
+    if result.wrote_config and result.config_path:
+        console.print(f"[green]✓[/green] Wrote {result.config_path}")
+    console.print()
+    console.print(result.toml_section)
+    if result.instructions:
+        console.print()
+        console.print(f"[dim]{result.instructions}[/dim]")
 
 
 async def _connect_and_list(

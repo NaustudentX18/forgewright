@@ -17,6 +17,7 @@ from forgewright.cli.run_flow import flow_command
 from forgewright.cli.run_mcp import mcp_command
 from forgewright.cli.run_mcp_server import mcp_serve_command
 from forgewright.cli.run_resume import resume_command
+from forgewright.cli.run_tui import tui_command
 from forgewright.cli.run_web import web_command
 from forgewright.cli.sandbox import sandbox_command
 from forgewright.cli.trust import trust_command
@@ -100,7 +101,7 @@ app.command(
 app.command(
     name="audit",
     help=(
-        "Inspect the tamper-evident audit log. Sub-actions: verify, tail, export. "
+        "Inspect the tamper-evident audit log. Sub-actions: verify, tail, export, query. "
         "Try `forgewright audit verify --help`."
     ),
 )(audit_command)
@@ -127,6 +128,13 @@ app.command(
         "on the tailnet can install it as a PWA. Requires the [web] extra."
     ),
 )(web_command)
+app.command(
+    name="tui",
+    help=(
+        "Launch the Textual terminal UI against a running web server "
+        "(same /api/sessions SSE protocol). Requires the [tui] extra."
+    ),
+)(tui_command)
 
 
 def main() -> None:

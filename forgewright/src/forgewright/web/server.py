@@ -46,8 +46,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -341,6 +347,14 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 # App factory
 # --------------------------------------------------------------------------- #
 
+#: Hard cap on POST ``/share-in`` bodies. The PWA share target is
+#: manifest-advertised to installed PWAs, accepts anonymous HTTP, and
+#: would otherwise be a DoS sink for a single oversized upload.
+#: 1 MB is enough for the share text + a small screenshot; anything
+#: larger should be uploaded via the regular ``POST /api/sessions/.../messages``
+#: attachment path (or refused at the client).
+_SHARE_IN_MAX_BYTES: int = 1_000_000
+
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the FastAPI app.
@@ -425,8 +439,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return _share_redirect(title=title, text=text, url=url)
 
     @app.post("/share-in", include_in_schema=False)
-    async def share_in_post(request: Request) -> RedirectResponse:
-        """POST share target (optional file) → redirect into the composer."""
+    async def share_in_post(request: Request) -> Response:
+        """POST share target (optional file) → redirect into the composer.
+
+        The body is size-capped to :data:`_SHARE_IN_MAX_BYTES` to keep an
+        anonymous, manifest-advertised endpoint from being abused as a
+        DoS sink. The cap is enforced both via the ``Content-Length``
+        header (cheap precheck) and via a streaming chunked read (so
+        lying or chunked clients are also bounded).
+        """
+        cl = request.headers.get("content-length")
+        if cl and cl.isdigit() and int(cl) > _SHARE_IN_MAX_BYTES:
+            return PlainTextResponse("payload too large", status_code=413)
+
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > _SHARE_IN_MAX_BYTES:
+                return PlainTextResponse("payload too large", status_code=413)
+            chunks.append(chunk)
+        # Cache the bounded body so ``request.form()`` re-parses it
+        # rather than re-reading the network stream.
+        request._body = b"".join(chunks)  # type: ignore[attr-defined]
+
         form = await request.form()
         title = str(form.get("title") or "")
         text = str(form.get("text") or "")

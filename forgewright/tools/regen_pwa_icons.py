@@ -1,13 +1,13 @@
-"""Regenerate PWA icon assets from the canonical 512×512 source.
+"""Regenerate PWA icon assets from the canonical 512x512 source.
 
 Inputs:
-  src/forgewright/web/static/icon-512.png   (canonical 512×512 design)
+  src/forgewright/web/static/icon-512.png   (canonical 512x512 design)
 
 Outputs (written next to the source):
   src/forgewright/web/static/icon-192.png         (re-rendered for sharpness)
   src/forgewright/web/static/icon-512.png         (passed through / re-encoded)
-  src/forgewright/web/static/apple-touch-icon.png (180×180 for iOS)
-  src/forgewright/web/static/icon-maskable-512.png (512×512 with 410×410
+  src/forgewright/web/static/apple-touch-icon.png (180x180 for iOS)
+  src/forgewright/web/static/icon-maskable-512.png (512x512 with 410x410
                                                     artwork safe-zone for
                                                     adaptive launchers)
 
@@ -28,10 +28,8 @@ from PIL import Image
 # Fall back to the legacy module-level constant for older Pillow builds
 # that don't have Image.Resampling yet. The cast silences the
 # "LANCZOS is not a known attribute" report on the legacy fallback.
-_LANCZOS = cast(
-    "Image.Resampling",
-    getattr(getattr(Image, "Resampling", Image), "LANCZOS"),
-)
+_resampling = getattr(Image, "Resampling", Image)
+_LANCZOS = cast("Image.Resampling", _resampling.LANCZOS)
 
 STATIC = Path(__file__).resolve().parents[1] / "src" / "forgewright" / "web" / "static"
 SOURCE = STATIC / "icon-512.png"
@@ -49,21 +47,21 @@ def regenerate_192(src: Image.Image) -> None:
 
 
 def regenerate_apple_touch(src: Image.Image) -> None:
-    # 180×180 is the iOS sweet spot; LANCZOS keeps the symbol crisp.
+    # 180x180 is the iOS sweet spot; LANCZOS keeps the symbol crisp.
     _save(src.resize((180, 180), _LANCZOS), "apple-touch-icon.png")
 
 
 def regenerate_maskable(src: Image.Image) -> None:
-    """Maskable icon: 512×512 with the artwork centered in a 410×410
+    """Maskable icon: 512x512 with the artwork centered in a 410x410
     safe zone. The outer 51px on every side is the system mask area
     (Android, iOS adaptive icons, web app launchers).
 
     We compose by:
       1. Solid #0A0A0B background (matches the dark chrome of the brand)
-      2. The source scaled into a 410×410 region centered, then alpha-
+      2. The source scaled into a 410x410 region centered, then alpha-
          composited on top.
 
-    The result is a single 512×512 RGBA PNG.
+    The result is a single 512x512 RGBA PNG.
     """
     SAFE = 410
     BG = (10, 10, 11, 255)  # #0A0A0B

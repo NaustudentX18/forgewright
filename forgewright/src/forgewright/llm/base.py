@@ -71,7 +71,9 @@ class LLMBackend:
         return False
 
     def count_tokens(self, messages: list[ChatMessage]) -> int:
-        return sum(len(m.content) // 4 for m in messages)
+        from forgewright.llm.token_count import character_heuristic_token_count
+
+        return character_heuristic_token_count(messages)
 
     @classmethod
     def from_config(cls, config: LLMConfig) -> LLMBackend:
