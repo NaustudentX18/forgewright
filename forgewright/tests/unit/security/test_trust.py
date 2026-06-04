@@ -216,3 +216,128 @@ def test_trustrule_to_toml_dict() -> None:
         "added_at": "2026-06-02T00:00:00Z",
         "reason": "test",
     }
+
+
+# ---------------------------------------------------------------------------
+# REPO scope (H0.7 — per-project trust)
+# ---------------------------------------------------------------------------
+
+
+def test_repo_trust_loaded_from_project_dir(tmp_path: Path) -> None:
+    """A ``.forgewright/trust.toml`` in cwd is loaded as REPO-scoped rules."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    forgewright_dir = project / ".forgewright"
+    forgewright_dir.mkdir()
+    (forgewright_dir / "trust.toml").write_text(
+        '[[rule]]\npattern = "pytest *"\nreason = "always allow tests"\n',
+        encoding="utf-8",
+    )
+    r = TrustRegistry(
+        machine_path=tmp_path / "machine.toml",
+        repo_path=project,
+    )
+    rules = {rule.pattern: rule for rule in r.list_rules()}
+    assert "pytest *" in rules
+    assert rules["pytest *"].scope == TrustScope.REPO
+    assert rules["pytest *"].reason == "always allow tests"
+    # And it actually allows the command.
+    assert r.is_allowed("pytest -q") is True
+
+
+def test_repo_trust_walks_up_to_find_file(tmp_path: Path) -> None:
+    """If no ``.forgewright/trust.toml`` is in the immediate directory,
+    the registry walks up to the first ancestor that has one."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    nested = project / "src" / "pkg"
+    nested.mkdir(parents=True)
+    forgewright_dir = project / ".forgewright"
+    forgewright_dir.mkdir()
+    (forgewright_dir / "trust.toml").write_text(
+        '[[rule]]\npattern = "cargo *"\n',
+        encoding="utf-8",
+    )
+    r = TrustRegistry(
+        machine_path=tmp_path / "machine.toml",
+        repo_path=nested,
+    )
+    assert r.is_allowed("cargo build --release") is True
+    rules = {rule.pattern: rule for rule in r.list_rules()}
+    assert rules["cargo *"].scope == TrustScope.REPO
+
+
+def test_repo_trust_not_loaded_when_disabled(tmp_path: Path) -> None:
+    """Passing ``load_repo_trust=False`` skips the cwd lookup entirely."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    forgewright_dir = project / ".forgewright"
+    forgewright_dir.mkdir()
+    (forgewright_dir / "trust.toml").write_text(
+        '[[rule]]\npattern = "secret-tool *"\n',
+        encoding="utf-8",
+    )
+    r = TrustRegistry(
+        machine_path=tmp_path / "machine.toml",
+        repo_path=project,
+        load_repo_trust=False,
+    )
+    assert r.list_rules() == []
+    assert r.is_allowed("secret-tool run") is False
+
+
+def test_repo_trust_malformed_does_not_crash(tmp_path: Path) -> None:
+    """A corrupt ``.forgewright/trust.toml`` is logged and ignored."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    forgewright_dir = project / ".forgewright"
+    forgewright_dir.mkdir()
+    (forgewright_dir / "trust.toml").write_text("not = valid = toml [[[", encoding="utf-8")
+    r = TrustRegistry(
+        machine_path=tmp_path / "machine.toml",
+        repo_path=project,
+    )
+    assert r.list_rules() == []
+    # Registry still works.
+    r.add("ls")
+    assert r.is_allowed("ls") is True
+
+
+def test_repo_rule_does_not_override_machine_rule(tmp_path: Path) -> None:
+    """If both machine and repo define a rule for the same pattern,
+    the MACHINE rule wins (it's the higher trust scope)."""
+    machine = tmp_path / "machine.toml"
+    r1 = TrustRegistry(machine_path=machine, load_repo_trust=False)
+    r1.add("ls", scope=TrustScope.MACHINE, reason="machine-scope")
+
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / ".forgewright").mkdir()
+    (project / ".forgewright" / "trust.toml").write_text(
+        '[[rule]]\npattern = "ls"\nreason = "repo-scope"\n',
+        encoding="utf-8",
+    )
+    r2 = TrustRegistry(machine_path=machine, repo_path=project)
+    rule = next(rule for rule in r2.list_rules() if rule.pattern == "ls")
+    assert rule.scope == TrustScope.MACHINE
+    assert rule.reason == "machine-scope"
+
+
+def test_repo_trust_persistence_writes_only_machine(tmp_path: Path) -> None:
+    """A REPO rule is never written back to the on-disk machine path."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / ".forgewright").mkdir()
+    (project / ".forgewright" / "trust.toml").write_text(
+        '[[rule]]\npattern = "git *"\n',
+        encoding="utf-8",
+    )
+    machine = tmp_path / "machine.toml"
+    r = TrustRegistry(machine_path=machine, repo_path=project)
+    # Adding a REPO rule must not touch the on-disk machine file.
+    r.add("ls", scope=TrustScope.REPO, reason="session-only")
+    assert not machine.exists(), "REPO add wrote to the machine file"
+    # And the REPO rule from the project trust.toml is still in memory.
+    patterns = {rule.pattern for rule in r.list_rules()}
+    assert "git *" in patterns
+    assert "ls" in patterns

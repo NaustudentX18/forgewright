@@ -124,13 +124,35 @@ class TrustRegistry:
 
     _DEFAULT_PATH: ClassVar[str] = str(Path.home() / ".config" / "forgewright" / "trust.toml")
 
-    def __init__(self, machine_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        machine_path: str | Path | None = None,
+        *,
+        repo_path: str | Path | None = None,
+        load_repo_trust: bool = True,
+    ) -> None:
+        """Build a TrustRegistry.
+
+        Args:
+            machine_path: Override the on-disk path for MACHINE rules.
+                Defaults to ``~/.config/forgewright/trust.toml``.
+            repo_path: Directory to start the upward search from when
+                looking for a project-scoped ``.forgewright/trust.toml``.
+                Defaults to the current working directory at construction
+                time. Pass an explicit value to make this testable.
+            load_repo_trust: When ``False`` (e.g. for tests that do not
+                want to pick up a stray ``.forgewright/trust.toml`` in
+                ``cwd``), skip the REPO scope load entirely.
+        """
         self._path: Path = Path(machine_path) if machine_path else Path(self._DEFAULT_PATH)
         # Rules in memory. MACHINE rules that came from disk are loaded
         # at init; SESSION/REPO rules accumulate over the process
         # lifetime.
         self._rules: dict[str, TrustRule] = {}
         self._load_from_disk()
+        if load_repo_trust:
+            start = Path(repo_path) if repo_path else Path.cwd()
+            self._load_repo_trust(start)
 
     # ------------------------------------------------------------------ #
     # Disk I/O
@@ -161,6 +183,51 @@ class TrustRegistry:
             # De-dupe: in-memory wins if it has the same pattern.
             if rule.pattern not in self._rules:
                 self._rules[rule.pattern] = rule
+
+    def _load_repo_trust(self, start: Path) -> None:
+        """Walk up from ``start`` looking for ``.forgewright/trust.toml``.
+
+        REPO rules are loaded into the in-memory registry but are never
+        written back to disk by :meth:`_persist` (that path only handles
+        MACHINE rules). Adding a REPO rule via the API mutates the
+        in-memory list only — the file on disk must be edited by hand
+        or by ``forgewright trust add --scope repo``.
+
+        Search stops at the first hit or at the filesystem root,
+        whichever comes first.
+        """
+        cur = start.resolve() if start.exists() else start
+        for directory in (cur, *cur.parents):
+            candidate = directory / ".forgewright" / "trust.toml"
+            if not candidate.exists():
+                continue
+            try:
+                with candidate.open("rb") as f:
+                    data = tomllib.load(f)
+            except (OSError, tomllib.TOMLDecodeError) as exc:
+                logger.warning("trust.repo_load: failed to parse {}: {}", candidate, exc)
+                return
+            for entry in data.get("rule", []) or []:
+                try:
+                    rule = TrustRule(
+                        pattern=str(entry["pattern"]),
+                        scope=TrustScope.REPO,
+                        added_at=str(entry.get("added_at", "")),
+                        reason=str(entry.get("reason", "")),
+                    )
+                except (KeyError, ValueError) as exc:
+                    logger.warning(
+                        "trust.repo_load: skipping malformed rule {}: {}", entry, exc
+                    )
+                    continue
+                # REPO rules lose to MACHINE rules on a pattern collision
+                # (machine > repo > session is the resolution order).
+                existing = self._rules.get(rule.pattern)
+                if existing and existing.scope == TrustScope.MACHINE:
+                    continue
+                self._rules[rule.pattern] = rule
+            # First hit wins; do not walk past it.
+            return
 
     def _persist(self) -> None:
         """Write all MACHINE-scoped rules back to disk as TOML.
