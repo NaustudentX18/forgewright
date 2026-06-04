@@ -49,7 +49,7 @@ from typing import ClassVar
 
 from forgewright.logger import logger
 
-__all__ = ["TrustRegistry", "TrustRule", "TrustScope"]
+__all__ = ["DenyRule", "TrustRegistry", "TrustRule", "TrustScope"]
 
 
 class TrustScope(enum.StrEnum):
@@ -86,6 +86,37 @@ class TrustRule:
         return {
             "pattern": self.pattern,
             "scope": self.scope.value,
+            "added_at": self.added_at,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class DenyRule:
+    """A single denylist entry.
+
+    A pattern in this list is *forbidden* — even if the same pattern
+    (or a more permissive one) is in the trust allowlist, the deny
+    rule wins. This matches the principle of least surprise: the
+    user can say "never run ``rm -rf *`` again" with one keypress and
+    it sticks across sessions.
+
+    Attributes:
+        pattern: The match pattern. Same matching rules as
+            :class:`TrustRule` (fnmatch glob if it contains ``*``,
+            ``?``, or ``[``; otherwise exact-or-prefix-with-space).
+        added_at: ISO-8601 timestamp of when the rule was created.
+        reason: Free-form human note ("user typed 'd' at prompt").
+    """
+
+    pattern: str
+    added_at: str
+    reason: str = ""
+
+    def to_toml_dict(self) -> dict[str, str]:
+        """Render as a dict suitable for ``[[deny]]`` in TOML."""
+        return {
+            "pattern": self.pattern,
             "added_at": self.added_at,
             "reason": self.reason,
         }
@@ -147,8 +178,10 @@ class TrustRegistry:
         self._path: Path = Path(machine_path) if machine_path else Path(self._DEFAULT_PATH)
         # Rules in memory. MACHINE rules that came from disk are loaded
         # at init; SESSION/REPO rules accumulate over the process
-        # lifetime.
+        # lifetime. Deny rules live in their own map for O(1) lookup
+        # precedence (deny always wins over allow).
         self._rules: dict[str, TrustRule] = {}
+        self._deny_rules: dict[str, DenyRule] = {}
         self._load_from_disk()
         if load_repo_trust:
             start = Path(repo_path) if repo_path else Path.cwd()
@@ -159,7 +192,7 @@ class TrustRegistry:
     # ------------------------------------------------------------------ #
 
     def _load_from_disk(self) -> None:
-        """Load MACHINE rules from disk; ignore schema errors."""
+        """Load MACHINE rules and deny rules from disk; ignore schema errors."""
         if not self._path.exists():
             return
         try:
@@ -183,6 +216,19 @@ class TrustRegistry:
             # De-dupe: in-memory wins if it has the same pattern.
             if rule.pattern not in self._rules:
                 self._rules[rule.pattern] = rule
+
+        for entry in data.get("deny", []) or []:
+            try:
+                rule = DenyRule(
+                    pattern=str(entry["pattern"]),
+                    added_at=str(entry.get("added_at", "")),
+                    reason=str(entry.get("reason", "")),
+                )
+            except (KeyError, ValueError) as exc:
+                logger.warning("trust.load: skipping malformed deny rule {}: {}", entry, exc)
+                continue
+            if rule.pattern not in self._deny_rules:
+                self._deny_rules[rule.pattern] = rule
 
     def _load_repo_trust(self, start: Path) -> None:
         """Walk up from ``start`` looking for ``.forgewright/trust.toml``.
@@ -230,13 +276,14 @@ class TrustRegistry:
             return
 
     def _persist(self) -> None:
-        """Write all MACHINE-scoped rules back to disk as TOML.
+        """Write all MACHINE-scoped rules + deny rules back to disk as TOML.
 
         We do the write manually (no third-party TOML writer) so the
         registry has no new dep. The format is the same as
         :meth:`__init__` expects to read back.
         """
         machine_rules = [r for r in self._rules.values() if r.scope == TrustScope.MACHINE]
+        deny_rules = list(self._deny_rules.values())
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with self._path.open("w", encoding="utf-8") as f:
@@ -246,6 +293,11 @@ class TrustRegistry:
                     f.write("\n[[rule]]\n")
                     f.write(f"pattern = {toml_quote(rule.pattern)}\n")
                     f.write(f"scope = {toml_quote(rule.scope.value)}\n")
+                    f.write(f"added_at = {toml_quote(rule.added_at)}\n")
+                    f.write(f"reason = {toml_quote(rule.reason)}\n")
+                for rule in deny_rules:
+                    f.write("\n[[deny]]\n")
+                    f.write(f"pattern = {toml_quote(rule.pattern)}\n")
                     f.write(f"added_at = {toml_quote(rule.added_at)}\n")
                     f.write(f"reason = {toml_quote(rule.reason)}\n")
         except OSError as exc:
@@ -261,8 +313,20 @@ class TrustRegistry:
         A rule with pattern ``ls`` matches ``ls`` and ``ls -la`` but
         not ``lsof``. A rule with pattern ``git *`` matches anything
         starting with ``git`` (see :func:`_rule_matches`).
+
+        **Deny rules always win.** A command matched by a deny rule
+        returns ``False`` even if an allow rule also matches it.
+        This is the principle of least surprise: the user can say
+        "never run ``rm -rf *``" and trust that nothing in the
+        allowlist will override that.
         """
+        if any(_rule_matches(command, d.pattern) for d in self._deny_rules.values()):
+            return False
         return any(_rule_matches(command, r.pattern) for r in self._rules.values())
+
+    def is_denied(self, command: str) -> bool:
+        """Return True if ``command`` matches a deny rule."""
+        return any(_rule_matches(command, d.pattern) for d in self._deny_rules.values())
 
     def add(
         self,
@@ -309,6 +373,34 @@ class TrustRegistry:
     def list_rules(self) -> list[TrustRule]:
         """Return a copy of all rules, in insertion order."""
         return list(self._rules.values())
+
+    # ------------------------------------------------------------------ #
+    # Deny rules
+    # ------------------------------------------------------------------ #
+
+    def add_deny(self, pattern: str, reason: str = "") -> DenyRule:
+        """Add (or replace) a deny rule. Persists to the on-disk registry.
+
+        The on-disk format is ``[[deny]]``; deny rules are kept in the
+        same file as allow rules for simplicity. The in-memory map is
+        always updated, then the file is rewritten.
+        """
+        rule = DenyRule(pattern=pattern, added_at=_now_iso(), reason=reason)
+        self._deny_rules[pattern] = rule
+        self._persist()
+        return rule
+
+    def remove_deny(self, pattern: str) -> bool:
+        """Remove a deny rule. Returns True if a rule was removed."""
+        rule = self._deny_rules.pop(pattern, None)
+        if rule is None:
+            return False
+        self._persist()
+        return True
+
+    def list_deny_rules(self) -> list[DenyRule]:
+        """Return a copy of all deny rules, in insertion order."""
+        return list(self._deny_rules.values())
 
     def clear_session(self) -> None:
         """Drop all SESSION-scoped rules (no-op for MACHINE / REPO)."""

@@ -341,3 +341,68 @@ def test_repo_trust_persistence_writes_only_machine(tmp_path: Path) -> None:
     patterns = {rule.pattern for rule in r.list_rules()}
     assert "git *" in patterns
     assert "ls" in patterns
+
+
+# ---------------------------------------------------------------------------
+# Deny rules (H3.2 — pressing 'd' at the approval prompt)
+# ---------------------------------------------------------------------------
+
+
+def test_deny_rule_blocks_command(tmp_path: Path) -> None:
+    """A deny rule for ``rm`` makes ``is_allowed('rm -rf /')`` False."""
+    r = TrustRegistry(machine_path=tmp_path / "trust.toml", load_repo_trust=False)
+    r.add_deny("rm *", reason="test")
+    assert r.is_denied("rm -rf /") is True
+    assert r.is_allowed("rm -rf /") is False
+    # And unrelated commands are unaffected.
+    assert r.is_allowed("ls") is False  # no allow rule either
+
+
+def test_deny_rule_overrides_allow_rule(tmp_path: Path) -> None:
+    """A deny rule for ``rm`` blocks even if an allow rule covers the
+    same command. Deny always wins (principle of least surprise)."""
+    r = TrustRegistry(machine_path=tmp_path / "trust.toml", load_repo_trust=False)
+    r.add("rm *", scope=TrustScope.MACHINE, reason="user trust")
+    r.add_deny("rm *", reason="user changed their mind")
+    assert r.is_allowed("rm file.txt") is False
+    assert r.is_denied("rm file.txt") is True
+
+
+def test_deny_rule_persists_to_disk(tmp_path: Path) -> None:
+    """A deny rule is written to the on-disk trust file and re-loads."""
+    path = tmp_path / "trust.toml"
+    r1 = TrustRegistry(machine_path=path, load_repo_trust=False)
+    r1.add_deny("rm -rf *", reason="never")
+    assert path.exists()
+    with path.open("rb") as f:
+        data = tomllib.load(f)
+    deny = data.get("deny", [])
+    patterns = {entry["pattern"] for entry in deny}
+    assert "rm -rf *" in patterns
+
+    r2 = TrustRegistry(machine_path=path, load_repo_trust=False)
+    assert r2.is_denied("rm -rf /tmp") is True
+    assert r2.is_allowed("rm -rf /tmp") is False
+
+
+def test_deny_rule_remove(tmp_path: Path) -> None:
+    """Removing a deny rule restores the previous allow behaviour."""
+    r = TrustRegistry(machine_path=tmp_path / "trust.toml", load_repo_trust=False)
+    r.add("ls", scope=TrustScope.MACHINE)
+    r.add_deny("ls", reason="temp")
+    assert r.is_allowed("ls") is False
+    assert r.remove_deny("ls") is True
+    assert r.is_allowed("ls") is True
+    # And re-removing returns False.
+    assert r.remove_deny("ls") is False
+
+
+def test_deny_rule_round_trip_with_allow(tmp_path: Path) -> None:
+    """Both rule types coexist in the same on-disk file."""
+    path = tmp_path / "trust.toml"
+    r1 = TrustRegistry(machine_path=path, load_repo_trust=False)
+    r1.add("ls", scope=TrustScope.MACHINE, reason="safe")
+    r1.add_deny("rm *", reason="dangerous")
+    r2 = TrustRegistry(machine_path=path, load_repo_trust=False)
+    assert r2.is_allowed("ls") is True
+    assert r2.is_allowed("rm anything") is False

@@ -129,10 +129,27 @@ async def test_callback_A_returns_session_and_adds_session_rule(
 
 
 @pytest.mark.asyncio
-async def test_callback_d_treated_as_no(trust: TrustRegistry) -> None:
-    """``d`` (deny-rule) is not implemented in v0.1; falls back to ``n``."""
+async def test_callback_d_writes_deny_rule(trust: TrustRegistry) -> None:
+    """``d`` at the prompt writes a deny rule and returns DENY (H3.2)."""
     af = ApprovalFlow(trust, interactive=True, prompt_callback=lambda _: "d")
-    result = await af.request_approval("ls")
+    result = await af.request_approval("curl https://evil.example")
+    assert result.decision == ApprovalDecision.DENY
+    # A deny rule was added.
+    deny = trust.list_deny_rules()
+    assert any(rule.pattern == "curl *" for rule in deny)
+    # And the registry now blocks that command.
+    assert trust.is_denied("curl https://other.example") is True
+    assert trust.is_allowed("curl https://other.example") is False
+
+
+@pytest.mark.asyncio
+async def test_callback_d_legacy_compat_returns_no(trust: TrustRegistry) -> None:
+    """The pre-v0.3 behaviour of 'd' is still 'NO' for a non-tokenizable
+    command (defensive: a corrupt prompt input should never write a
+    wildcard ``*`` rule)."""
+    af = ApprovalFlow(trust, interactive=True, prompt_callback=lambda _: "d")
+    # A command that cannot be tokenized to a first word.
+    result = await af.request_approval("")
     assert result.decision == ApprovalDecision.NO
     assert result.rule_added is None
 

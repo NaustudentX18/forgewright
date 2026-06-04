@@ -200,9 +200,23 @@ class ApprovalFlow:
         if choice == "n" or choice == "N" or choice == "":
             return ApprovalResult(decision=ApprovalDecision.NO)
         if choice == "d" or choice == "D":
-            # Deny-rule machinery lands in v0.2; for v0.1 treat as plain NO.
-            logger.debug("approval.deny_rule_v02 cmd={}", command[:80])
-            return ApprovalResult(decision=ApprovalDecision.NO)
+            # Deny rule: persist a pattern that will short-circuit this
+            # command (and anything matching it) on every future run.
+            pattern = derive_pattern(command)
+            if not pattern:
+                # Could not derive a sensible pattern (empty command,
+                # tokenize failure). Fall back to a plain NO without
+                # writing a useless "*" rule.
+                logger.debug("approval.deny_no_pattern cmd={}", command[:80])
+                return ApprovalResult(decision=ApprovalDecision.NO)
+            rule = self.trust.add_deny(
+                pattern, reason="user typed 'd' at prompt"
+            )
+            logger.info("approval.deny_rule_added pattern={}", pattern)
+            return ApprovalResult(
+                decision=ApprovalDecision.DENY,
+                rule_added=rule,  # type: ignore[arg-type]
+            )
 
         # Unknown input: deny, and warn so noisy mis-keypresses show up in the log.
         logger.warning("approval.unknown_choice choice={} cmd={}", choice, command[:80])
