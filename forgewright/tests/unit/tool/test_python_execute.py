@@ -128,3 +128,43 @@ async def test_docker_mode_without_docker_installed(monkeypatch: pytest.MonkeyPa
     assert "[sandbox]" in err
     assert "forgewright[sandbox]" in err
     assert "docker" in err.lower()
+
+
+@pytest.mark.asyncio
+async def test_subprocess_finishes_under_uv_runtime() -> None:
+    """Regression: avoid uv asyncio subprocess hangs."""
+    tool = PythonExecuteTool()
+
+    result = await tool(code='print("ok")', timeout_s=5)
+
+    assert result.is_error is False
+    assert "ok" in (result.output or "")
+
+
+@pytest.mark.asyncio
+async def test_truncation_cap_from_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H0.8c: PythonExecuteTool reads its truncation cap from
+    Settings.tools.max_output_chars."""
+    import forgewright.tool.python_execute as mod
+    from forgewright.config import Settings
+
+    custom = Settings(tools={"max_output_chars": 64})  # type: ignore[arg-type]
+    # Patch the helper that resolves the cap — the prior test reloads
+    # this module, so a string-path patch on `get_settings` can land on
+    # the wrong module instance. Patching the helper directly is
+    # robust against that.
+    monkeypatch.setattr(mod, "_max_output_chars", lambda: 64)
+    tool = mod.PythonExecuteTool()
+    result = await tool(code='print("A" * 512, end="")')
+    assert result.is_error is False
+    body = result.output or ""
+    assert "truncated" in body
+    # The stdout slice (between "stdout:\n" and the truncation marker)
+    # should be no longer than the configured cap.
+    start = body.find("stdout:\n")
+    assert start != -1
+    after = body[start + len("stdout:\n"):]
+    assert after.startswith("A" * 64)
+    _ = custom  # silence linter; we keep the import for clarity

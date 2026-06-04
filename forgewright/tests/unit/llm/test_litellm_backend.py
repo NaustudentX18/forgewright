@@ -261,14 +261,14 @@ class TestCompletionParams:
 
 
 class TestMaxContextTokens:
-    def test_uses_litellm_get_max_tokens_first(self) -> None:
-        """H0.8a: per-call litellm.get_max_tokens() wins over the
+    def test_uses_litellm_model_info_max_input_tokens_first(self) -> None:
+        """H0.8a: per-call litellm.get_model_info().max_input_tokens wins over the
         DEFAULT_CONTEXT_TOKENS map and the Settings fallback."""
         cfg = _cfg("anthropic", model="claude-sonnet-4-6")
         b = LiteLLMBackend(cfg)
         with patch(
-            "forgewright.llm.litellm_backend.litellm.get_max_tokens",
-            return_value=42_000,
+            "forgewright.llm.litellm_backend.litellm.get_model_info",
+            return_value={"max_input_tokens": 42_000, "max_output_tokens": 8_000},
         ) as m:
             assert b.max_context_tokens() == 42_000
         m.assert_called_once()
@@ -279,7 +279,7 @@ class TestMaxContextTokens:
         cfg = _cfg("anthropic", model="m")
         b = LiteLLMBackend(cfg)
         with patch(
-            "forgewright.llm.litellm_backend.litellm.get_max_tokens",
+            "forgewright.llm.litellm_backend.litellm.get_model_info",
             side_effect=RuntimeError("unknown model"),
         ):
             assert b.max_context_tokens() == 200_000
@@ -293,8 +293,8 @@ class TestMaxContextTokens:
         with (
             patch("forgewright.config.get_settings", return_value=custom),
             patch(
-                "forgewright.llm.litellm_backend.litellm.get_max_tokens",
-                return_value=None,
+                "forgewright.llm.litellm_backend.litellm.get_model_info",
+                return_value={},
             ),
         ):
             # The 'stub' provider isn't in DEFAULT_CONTEXT_TOKENS, so the

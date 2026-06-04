@@ -32,7 +32,13 @@ from dataclasses import dataclass
 
 from forgewright.logger import logger
 from forgewright.security.denylist import SAFE_BUILTINS, check_command
-from forgewright.security.trust import TrustRegistry, TrustRule, TrustScope, derive_pattern
+from forgewright.security.trust import (
+    DenyRule,
+    TrustRegistry,
+    TrustRule,
+    TrustScope,
+    derive_pattern,
+)
 
 __all__ = ["ApprovalDecision", "ApprovalFlow", "ApprovalResult"]
 
@@ -64,7 +70,7 @@ class ApprovalResult:
     """
 
     decision: ApprovalDecision
-    rule_added: TrustRule | None = None
+    rule_added: TrustRule | DenyRule | None = None
 
 
 class ApprovalFlow:
@@ -209,13 +215,13 @@ class ApprovalFlow:
                 # writing a useless "*" rule.
                 logger.debug("approval.deny_no_pattern cmd={}", command[:80])
                 return ApprovalResult(decision=ApprovalDecision.NO)
-            rule = self.trust.add_deny(
+            deny_rule: DenyRule = self.trust.add_deny(
                 pattern, reason="user typed 'd' at prompt"
             )
             logger.info("approval.deny_rule_added pattern={}", pattern)
             return ApprovalResult(
                 decision=ApprovalDecision.DENY,
-                rule_added=rule,  # type: ignore[arg-type]
+                rule_added=deny_rule,
             )
 
         # Unknown input: deny, and warn so noisy mis-keypresses show up in the log.

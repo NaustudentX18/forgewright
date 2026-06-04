@@ -219,7 +219,7 @@ class TrustRegistry:
 
         for entry in data.get("deny", []) or []:
             try:
-                rule = DenyRule(
+                deny_rule: DenyRule = DenyRule(
                     pattern=str(entry["pattern"]),
                     added_at=str(entry.get("added_at", "")),
                     reason=str(entry.get("reason", "")),
@@ -227,8 +227,8 @@ class TrustRegistry:
             except (KeyError, ValueError) as exc:
                 logger.warning("trust.load: skipping malformed deny rule {}: {}", entry, exc)
                 continue
-            if rule.pattern not in self._deny_rules:
-                self._deny_rules[rule.pattern] = rule
+            if deny_rule.pattern not in self._deny_rules:
+                self._deny_rules[deny_rule.pattern] = deny_rule
 
     def _load_repo_trust(self, start: Path) -> None:
         """Walk up from ``start`` looking for ``.forgewright/trust.toml``.
@@ -295,11 +295,11 @@ class TrustRegistry:
                     f.write(f"scope = {toml_quote(rule.scope.value)}\n")
                     f.write(f"added_at = {toml_quote(rule.added_at)}\n")
                     f.write(f"reason = {toml_quote(rule.reason)}\n")
-                for rule in deny_rules:
+                for deny_rule_item in deny_rules:
                     f.write("\n[[deny]]\n")
-                    f.write(f"pattern = {toml_quote(rule.pattern)}\n")
-                    f.write(f"added_at = {toml_quote(rule.added_at)}\n")
-                    f.write(f"reason = {toml_quote(rule.reason)}\n")
+                    f.write(f"pattern = {toml_quote(deny_rule_item.pattern)}\n")
+                    f.write(f"added_at = {toml_quote(deny_rule_item.added_at)}\n")
+                    f.write(f"reason = {toml_quote(deny_rule_item.reason)}\n")
         except OSError as exc:
             logger.warning("trust.persist: failed to write {}: {}", self._path, exc)
 

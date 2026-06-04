@@ -6,13 +6,22 @@ All tests mock the docker SDK so no real daemon or container is required.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 from forgewright.sandbox import DockerSandbox, Sandbox, SandboxResult
 from forgewright.sandbox.docker_sandbox import DockerSandbox as DirectClass
+
+
+@pytest.fixture(autouse=True)
+def _run_mocked_docker_calls_inline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Avoid leaking executor threads while the Docker SDK is fully mocked."""
+
+    async def _inline_to_thread(func, /, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr("forgewright.sandbox.docker_sandbox.asyncio.to_thread", _inline_to_thread)
 
 
 def _install_docker_mock(
@@ -161,11 +170,11 @@ async def test_run_propagates_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_docker_mock(monkeypatch, ping_raises=False)
 
     async def _blocker(awaitable, timeout=None):  # type: ignore[no-untyped-def]
-        # Await the inner coroutine (to_thread) so it doesn't leak, then
-        # raise TimeoutError to mimic the production timeout path.
+        # Do not start the inner to_thread coroutine; this test only needs
+        # to exercise DockerSandbox's timeout handling and starting a worker
+        # can leave the pytest event loop waiting on executor teardown.
         if asyncio.iscoroutine(awaitable):
-            with contextlib.suppress(Exception):
-                await awaitable
+            awaitable.close()
         raise TimeoutError
 
     s = DockerSandbox()

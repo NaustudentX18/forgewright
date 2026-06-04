@@ -543,3 +543,65 @@ async def test_flow_handles_empty_decomposition() -> None:
     # Empty array parses to nothing; we get the single-step fallback.
     assert result.total_step_count == 1
     assert result.steps[0].agent == "manus"
+
+
+# --------------------------------------------------------------------------- #
+# H0.8e: Settings.flow drives PlanningFlow defaults
+# --------------------------------------------------------------------------- #
+
+
+def test_flow_defaults_from_settings() -> None:
+    """H0.8e: with no explicit kwargs, PlanningFlow reads its caps from
+    Settings.flow (max_total_steps, per_agent_max_steps, timeout_s)."""
+    from forgewright.config import Settings
+    from forgewright.flow import PlanningFlow
+
+    custom = Settings(
+        flow={
+            "max_total_steps": 7,
+            "per_agent_max_steps": 3,
+            "timeout_s": 123,
+        }  # type: ignore[arg-type]
+    )
+    # Patch the symbol the PlanningFlow __init__ resolves at call time.
+    import forgewright.flow.planning as planning_mod
+
+    original = planning_mod.get_settings
+    planning_mod.get_settings = lambda: custom
+    try:
+        flow = PlanningFlow(llm=ScriptedLLM())
+        assert flow.max_total_steps == 7
+        assert flow.per_agent_max_steps == 3
+        assert flow.timeout_s == 123
+    finally:
+        planning_mod.get_settings = original
+
+
+def test_flow_explicit_kwargs_override_settings() -> None:
+    """H0.8e: explicit constructor kwargs still win over Settings.flow."""
+    from forgewright.config import Settings
+    from forgewright.flow import PlanningFlow
+
+    custom = Settings(
+        flow={
+            "max_total_steps": 7,
+            "per_agent_max_steps": 3,
+            "timeout_s": 123,
+        }  # type: ignore[arg-type]
+    )
+    import forgewright.flow.planning as planning_mod
+
+    original = planning_mod.get_settings
+    planning_mod.get_settings = lambda: custom
+    try:
+        flow = PlanningFlow(
+            llm=ScriptedLLM(),
+            max_total_steps=99,
+            per_agent_max_steps=88,
+            timeout_s=77,
+        )
+        assert flow.max_total_steps == 99
+        assert flow.per_agent_max_steps == 88
+        assert flow.timeout_s == 77
+    finally:
+        planning_mod.get_settings = original

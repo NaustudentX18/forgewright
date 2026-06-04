@@ -6,6 +6,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from forgewright.config import get_settings
+from forgewright.cost import CostLimitReached, IterationLimitReached
 from forgewright.llm import LLM
 from forgewright.logger import logger
 from forgewright.schema import ChatMessage
@@ -18,6 +20,12 @@ class AgentState(StrEnum):
     RUNNING = "running"
     FINISHED = "finished"
     ERROR = "error"
+    # H2.3 — typed final states for per-session cost / iteration caps.
+    # These are *not* errors; the loop terminates cleanly with a
+    # descriptive state so the caller (CLI, REPL, tests) can surface
+    # a friendly message instead of a stack trace.
+    COST_LIMIT_REACHED = "cost_limit_reached"
+    ITERATION_LIMIT_REACHED = "iteration_limit_reached"
 
 
 @dataclass
@@ -27,14 +35,21 @@ class AgentResult:
     output: str
     step_count: int
     state: AgentState
+    # Typed final-state string for persistence. When a cap fires, the
+    # loop sets this to ``"cost_limit_reached"`` /
+    # ``"iteration_limit_reached"``; otherwise ``None``. Callers that
+    # write to a :class:`forgewright.session.Session` can copy this
+    # straight into ``session.metadata["final_state"]``.
+    final_state: str | None = None
     messages: list[ChatMessage] = field(default_factory=list)
 
 
 class Memory:
     """Bounded message history with a simple stuck-loop detector."""
 
-    def __init__(self, max_messages: int = 200) -> None:
-        self._buf: deque[ChatMessage] = deque(maxlen=max_messages)
+    def __init__(self, max_messages: int | None = None) -> None:
+        cap = max_messages if max_messages is not None else get_settings().agent.memory_max_messages
+        self._buf: deque[ChatMessage] = deque(maxlen=cap)
         self._last_assistant: str | None = None
         self._duplicate_count = 0
 
@@ -79,6 +94,38 @@ class BaseAgent:
             self.step_count += 1
             try:
                 await self.step()
+            except CostLimitReached as exc:
+                # H2.3 — cost cap is a typed final state, not an error.
+                # The MeteredLLM wrapper raises this pre-call so the LLM
+                # is never invoked against an already-exhausted budget.
+                logger.warning(
+                    "agent.cost_limit_reached cost={:.4f} cap={:.4f}",
+                    exc.cost,
+                    exc.cap,
+                )
+                self.state = AgentState.COST_LIMIT_REACHED
+                return AgentResult(
+                    output=str(exc),
+                    step_count=self.step_count,
+                    state=self.state,
+                    final_state="cost_limit_reached",
+                    messages=self.memory.snapshot(),
+                )
+            except IterationLimitReached as exc:
+                # H2.3 — iteration cap is also a typed final state.
+                logger.warning(
+                    "agent.iteration_limit_reached iterations={} cap={}",
+                    exc.iterations,
+                    exc.cap,
+                )
+                self.state = AgentState.ITERATION_LIMIT_REACHED
+                return AgentResult(
+                    output=str(exc),
+                    step_count=self.step_count,
+                    state=self.state,
+                    final_state="iteration_limit_reached",
+                    messages=self.memory.snapshot(),
+                )
             except Exception as exc:
                 logger.exception("agent.step error")
                 self.state = AgentState.ERROR

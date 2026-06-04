@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 from typing import Any, ClassVar
 
+from forgewright.config import get_settings
 from forgewright.logger import logger
 from forgewright.schema import ToolResult
 from forgewright.tool.base import BaseTool
@@ -12,21 +15,24 @@ from forgewright.tool.base import BaseTool
 __all__ = ["PythonExecuteTool"]
 
 
-# Truncate stdout / stderr at 100 KiB each to keep tool results bounded.
-_MAX_OUTPUT_CHARS = 100_000
-
 # Header shown in the tool result to make the source visible to the model.
 _RESULT_HEADER = "python3 -c <code>"
 
 
+def _max_output_chars() -> int:
+    """Per-stream truncation cap, sourced from Settings."""
+    return get_settings().tools.max_output_chars
+
+
 def _format_output(stdout: str, stderr: str, exit_code: int) -> str:
     """Assemble the body of a `ToolResult.output` from a captured run."""
+    cap = _max_output_chars()
     truncated_parts: list[str] = []
-    if len(stdout) > _MAX_OUTPUT_CHARS:
-        stdout = stdout[:_MAX_OUTPUT_CHARS] + "\n... [truncated]"
+    if len(stdout) > cap:
+        stdout = stdout[:cap] + "\n... [truncated]"
         truncated_parts.append("stdout truncated")
-    if len(stderr) > _MAX_OUTPUT_CHARS:
-        stderr = stderr[:_MAX_OUTPUT_CHARS] + "\n... [truncated]"
+    if len(stderr) > cap:
+        stderr = stderr[:cap] + "\n... [truncated]"
         truncated_parts.append("stderr truncated")
     note = f" ({'; '.join(truncated_parts)})" if truncated_parts else ""
     body = f"$ {_RESULT_HEADER}\nexit: {exit_code}{note}"
@@ -88,15 +94,24 @@ class PythonExecuteTool(BaseTool):
         return ToolResult(is_error=True, error=f"Unknown mode: {mode}")
 
     async def _run_subprocess(self, code: str, timeout_s: int, cwd: str | None) -> ToolResult:
-        """Run `python3 -c <code>` in a subprocess; kill it on timeout."""
+        """Run Python in a subprocess; kill it on timeout."""
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "python3",
-                "-c",
-                code,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            # Keep this synchronous inside the async tool wrapper. In
+            # uv-managed test/runtime environments, asyncio subprocess
+            # and asyncio.to_thread child execution can hang even when
+            # the same subprocess.run call completes immediately.
+            proc = subprocess.run(
+                [sys.executable, "-c", code],
+                capture_output=True,
                 cwd=cwd,
+                timeout=timeout_s,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("python_execute.timeout timeout_s={} cwd={}", timeout_s, cwd)
+            return ToolResult(
+                is_error=True,
+                error=f"TimeoutError: python execution exceeded {timeout_s}s",
             )
         except FileNotFoundError as exc:
             logger.warning("python_execute.spawn_failed err={}", exc)
@@ -105,24 +120,9 @@ class PythonExecuteTool(BaseTool):
             logger.warning("python_execute.spawn_failed err={}", exc)
             return ToolResult(is_error=True, error=f"Failed to spawn: {type(exc).__name__}: {exc}")
 
-        try:
-            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
-        except TimeoutError:
-            import contextlib
-
-            with contextlib.suppress(Exception):
-                proc.kill()
-            with contextlib.suppress(Exception):
-                await proc.wait()
-            logger.warning("python_execute.timeout timeout_s={} cwd={}", timeout_s, cwd)
-            return ToolResult(
-                is_error=True,
-                error=f"TimeoutError: python execution exceeded {timeout_s}s",
-            )
-
-        stdout = stdout_b.decode("utf-8", errors="replace")
-        stderr = stderr_b.decode("utf-8", errors="replace")
-        exit_code = proc.returncode if proc.returncode is not None else -1
+        stdout = (proc.stdout or b"").decode("utf-8", errors="replace")
+        stderr = (proc.stderr or b"").decode("utf-8", errors="replace")
+        exit_code = proc.returncode
         return ToolResult(
             output=_format_output(stdout, stderr, exit_code),
             error=None if exit_code == 0 else f"exit {exit_code}",

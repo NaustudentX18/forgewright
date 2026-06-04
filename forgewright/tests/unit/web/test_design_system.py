@@ -16,14 +16,60 @@ The tests are organised into four groups:
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
+import httpx
 import pytest
-from fastapi.testclient import TestClient
 from forgewright.config import LLMConfig, Settings
 from forgewright.web.server import create_app
+
+
+class ASGIClient:
+    """Small sync ASGI client for unit tests without TestClient thread portals."""
+
+    def __init__(self, app: Any) -> None:
+        self._app = app
+
+    def __enter__(self) -> ASGIClient:
+        return self
+
+    def __exit__(self, *_exc: Any) -> None:
+        return None
+
+    def get(self, url: str, **kwargs: Any) -> httpx.Response:
+        return asyncio.run(self._request("GET", url, **kwargs))
+
+    def post(self, url: str, **kwargs: Any) -> httpx.Response:
+        return asyncio.run(self._request("POST", url, **kwargs))
+
+    def delete(self, url: str, **kwargs: Any) -> httpx.Response:
+        return asyncio.run(self._request("DELETE", url, **kwargs))
+
+    def stream(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        return self._StreamContext(self._request(method, url, **kwargs))
+
+    async def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        transport = httpx.ASGITransport(app=self._app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.request(method, url, **kwargs)
+
+    class _StreamContext:
+        def __init__(self, coro: Any) -> None:
+            self._coro = coro
+            self._response: httpx.Response | None = None
+
+        def __enter__(self) -> httpx.Response:
+            self._response = asyncio.run(self._coro)
+            return self._response
+
+        def __exit__(self, *_exc: Any) -> None:
+            if self._response is not None:
+                asyncio.run(self._response.aclose())
+
 
 _STATIC = Path(__file__).resolve().parents[3] / "src" / "forgewright" / "web" / "static"
 INDEX = _STATIC / "index.html"
@@ -53,9 +99,9 @@ def stub_settings() -> Settings:
 @pytest.fixture
 def client(
     sessions_dir: Path, stub_settings: Settings
-) -> Iterator[TestClient]:
+) -> Iterator[ASGIClient]:
     application = create_app(settings=stub_settings)
-    with TestClient(application) as c:
+    with ASGIClient(application) as c:
         yield c
 
 
@@ -361,7 +407,7 @@ class TestStreamingTokens:
     render a typewriter effect (per the design system UX rules:
     'Stream text token-by-token; never show a spinner for 10s+')."""
 
-    def test_token_events_emitted(self, client: TestClient) -> None:
+    def test_token_events_emitted(self, client: ASGIClient) -> None:
         """A streaming message produces at least one ``event: token``."""
         sess = client.post("/api/sessions", json={}).json()
         with client.stream(
@@ -375,7 +421,7 @@ class TestStreamingTokens:
         # And still emits event: final for session persistence.
         assert "event: final" in body
 
-    def test_tokens_round_trip_to_final(self, client: TestClient) -> None:
+    def test_tokens_round_trip_to_final(self, client: ASGIClient) -> None:
         """The concatenated token content should equal the final
         content (no drift, no missing chunks)."""
         sess = client.post("/api/sessions", json={}).json()
@@ -409,7 +455,7 @@ class TestStreamingTokens:
                 f"token round-trip drift: tokens={token_chunks!r} final={final_text!r}"
             )
 
-    def test_typing_marker_event_present(self, client: TestClient) -> None:
+    def test_typing_marker_event_present(self, client: ASGIClient) -> None:
         """The thinking event must be the first event so the UI can
         show a typing indicator until the first token arrives."""
         sess = client.post("/api/sessions", json={}).json()
@@ -429,7 +475,7 @@ class TestStreamingTokens:
 # --------------------------------------------------------------------------- #
 
 
-class TestClientStreaming:
+class ASGIClientStreaming:
     """The static JS must wire up a handler for the ``token`` SSE event."""
 
     def test_js_handles_token_event(self) -> None:

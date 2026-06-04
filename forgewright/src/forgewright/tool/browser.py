@@ -15,7 +15,7 @@ loop does this on ``FINISHED`` / ``ERROR`` / ``Ctrl+C``).
 from __future__ import annotations
 
 import base64
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from forgewright.logger import logger
 from forgewright.schema import ToolResult
@@ -298,7 +298,7 @@ async def _extract_page_text(page: Any) -> str:
     if callable(aria_snapshot):
         # Playwright 1.49+: `accessibility.snapshot()` was removed in favor of
         # YAML-like aria snapshots. `mode="ai"` includes element refs for tools.
-        return await page.aria_snapshot(mode="ai")  # type: ignore[call-arg]
+        return cast(str, await page.aria_snapshot(mode="ai"))
 
     accessibility = getattr(page, "accessibility", None)
     if accessibility is None:

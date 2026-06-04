@@ -13,11 +13,10 @@ incl. static-file mounting and the OpenAPI/HTML routes.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from pathlib import Path
 
+import httpx
 import pytest
-from fastapi.testclient import TestClient
 from forgewright.config import LLMConfig, Settings
 from forgewright.web.server import create_app
 
@@ -33,23 +32,33 @@ def stub_settings() -> Settings:
 
 
 @pytest.fixture
-def client(
+def application(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     stub_settings: Settings,
-) -> Iterator[TestClient]:
-    """A FastAPI TestClient with sessions pointed at a tmp dir."""
+):
+    """A FastAPI app with sessions pointed at a tmp dir."""
     monkeypatch.setattr(
         "forgewright.web.server.default_sessions_dir", lambda: tmp_path
     )
-    application = create_app(settings=stub_settings)
-    with TestClient(application) as c:
+    return create_app(settings=stub_settings)
+
+
+@pytest.fixture
+async def client(application):
+    """An ASGI client that avoids TestClient thread-pool hangs in CI."""
+    transport = httpx.ASGITransport(app=application)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as c:
         yield c
 
 
-def test_root_serves_index_html(client: TestClient) -> None:
+@pytest.mark.asyncio
+async def test_root_serves_index_html(client: httpx.AsyncClient) -> None:
     """``GET /`` returns 200 with the chat UI HTML."""
-    r = client.get("/")
+    r = await client.get("/")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/html")
     body = r.text
@@ -61,14 +70,15 @@ def test_root_serves_index_html(client: TestClient) -> None:
     assert "style.css" in body
 
 
-def test_app_js_served_intact(client: TestClient) -> None:
+@pytest.mark.asyncio
+async def test_app_js_served_intact(client: httpx.AsyncClient) -> None:
     """``GET /static/app.js`` is served, correct content-type, and not
     truncated at the top (the v0.2.0 bug).
 
     The IIFE opener ``(function () {`` is the first line of the file;
     the ``})();`` closer is the last. Both must be present.
     """
-    r = client.get("/static/app.js")
+    r = await client.get("/static/app.js")
     assert r.status_code == 200
     assert "javascript" in r.headers["content-type"]
     body = r.text
@@ -83,10 +93,11 @@ def test_app_js_served_intact(client: TestClient) -> None:
     assert len(body) > 5_000, f"app.js suspiciously small: {len(body)} bytes"
 
 
-def test_style_css_served_intact(client: TestClient) -> None:
+@pytest.mark.asyncio
+async def test_style_css_served_intact(client: httpx.AsyncClient) -> None:
     """``GET /static/style.css`` is served with a non-empty, well-formed
     body (no truncation, no packaging glitch)."""
-    r = client.get("/static/style.css")
+    r = await client.get("/static/style.css")
     assert r.status_code == 200
     assert "css" in r.headers["content-type"]
     body = r.text
@@ -101,14 +112,15 @@ def test_style_css_served_intact(client: TestClient) -> None:
     assert len(body) > 1_000, f"style.css suspiciously small: {len(body)} bytes"
 
 
-def test_app_js_and_style_css_served_with_caching_headers(
-    client: TestClient,
+@pytest.mark.asyncio
+async def test_app_js_and_style_css_served_with_caching_headers(
+    client: httpx.AsyncClient,
 ) -> None:
     """Static assets should declare a content-length so the browser
     can stream them. A missing content-length is the classic sign of
     a streaming wrapper that might not flush the full file."""
-    r_js = client.get("/static/app.js")
-    r_css = client.get("/static/style.css")
+    r_js = await client.get("/static/app.js")
+    r_css = await client.get("/static/style.css")
     assert int(r_js.headers.get("content-length", len(r_js.content))) >= len(r_js.content)
     assert int(r_css.headers.get("content-length", len(r_css.content))) >= len(r_css.content)
     # And the bytes returned match the headers.
@@ -116,9 +128,10 @@ def test_app_js_and_style_css_served_with_caching_headers(
     assert len(r_css.content) == len(r_css.text.encode("utf-8"))
 
 
-def test_health_endpoint_still_works(client: TestClient) -> None:
+@pytest.mark.asyncio
+async def test_health_endpoint_still_works(client: httpx.AsyncClient) -> None:
     """Sanity: the API health route is unaffected by the static mounts."""
-    r = client.get("/api/health")
+    r = await client.get("/api/health")
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"

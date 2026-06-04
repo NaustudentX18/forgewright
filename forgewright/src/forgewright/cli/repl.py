@@ -24,7 +24,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import ClassVar, Protocol
+from typing import ClassVar, Protocol, cast
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -33,11 +33,14 @@ from rich.markdown import Markdown
 from rich.table import Table
 
 from forgewright.agent import Manus
+from forgewright.cli.caps import resolve_session_caps, wrap_llm_with_caps
 from forgewright.cli.stream import stream_agent_run
 from forgewright.config import Settings, get_settings
+from forgewright.conversation_state import FinalState, write_final_state
 from forgewright.llm import LLMBackend
 from forgewright.logger import logger
 from forgewright.schema import ChatMessage
+from forgewright.security.audit import AuditLog
 from forgewright.session import Session, default_sessions_dir
 
 __all__ = [
@@ -256,7 +259,12 @@ class SlashCommands:
         new_model = args[0]
         old = self.settings.llm.model
         self.settings.llm.model = new_model
-        new_llm = LLMBackend.from_config(self.settings.llm)
+        cap_usd, cap_iter = resolve_session_caps(self.settings)
+        new_llm = wrap_llm_with_caps(
+            LLMBackend.from_config(self.settings.llm),
+            max_usd=cap_usd,
+            max_iterations=cap_iter,
+        )
         # Rebuild the agent around the new LLM while preserving the
         # in-flight state and memory.
         old_state = self.agent.state
@@ -366,7 +374,12 @@ async def repl_loop(
     sessions_dir.mkdir(parents=True, exist_ok=True)
 
     session = initial_session or Session.new(metadata={"model": settings.llm.model})
-    llm = LLMBackend.from_config(settings.llm)
+    cap_usd, cap_iter = resolve_session_caps(settings)
+    llm = wrap_llm_with_caps(
+        LLMBackend.from_config(settings.llm),
+        max_usd=cap_usd,
+        max_iterations=cap_iter,
+    )
     agent = Manus(llm=llm, max_steps=settings.max_steps)
 
     if input_provider is None:
@@ -419,6 +432,14 @@ async def repl_loop(
         session.metadata.setdefault("model", settings.llm.model)
         session.metadata["step_count"] = result.step_count
         session.metadata["last_state"] = result.state.value
+        if result.final_state is not None:
+            session.metadata["final_state"] = result.final_state
+            write_final_state(
+                AuditLog(settings.security.audit_log),
+                session.id,
+                cast(FinalState, result.final_state),
+                actor={"type": "system", "name": "forgewright.repl"},
+            )
         try:
             session.save(sessions_dir)
         except OSError as exc:

@@ -240,3 +240,45 @@ async def test_large_stdout_is_truncated() -> None:
     assert "truncated" in (result.output or "")
     # The full payload should NOT be in the output (it's 200 KiB on its own).
     assert len(result.output or "") < 200_000
+
+
+@pytest.mark.asyncio
+async def test_python_subprocess_finishes_under_uv_runtime() -> None:
+    """Regression: asyncio child watchers can hang in uv-managed Python.
+
+    BashTool should still finish because it runs a blocking subprocess
+    with an internal timeout instead of waiting on asyncio subprocess internals.
+    """
+    tool = BashTool()
+
+    result = await tool(cmd='python3 -c \'print("ok")\'', timeout_s=5)
+
+    assert result.is_error is False
+    assert "ok" in (result.output or "")
+
+
+@pytest.mark.asyncio
+async def test_truncation_cap_from_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H0.8c: BashTool reads its truncation cap from
+    Settings.tools.max_output_chars."""
+    from forgewright.config import Settings, get_settings
+
+    get_settings.cache_clear()  # type: ignore[attr-defined]
+    custom = Settings(tools={"max_output_chars": 64})  # type: ignore[arg-type]
+    monkeypatch.setattr(
+        "forgewright.tool.bash.get_settings", lambda: custom
+    )
+    tool = BashTool()
+    result = await tool(cmd='python3 -c \'print("A"*512, end="")\'')
+    assert result.is_error is False
+    assert "truncated" in (result.output or "")
+    # The stdout slice (between "stdout:\n" and "\n... [truncated")
+    # should be no longer than the configured cap.
+    body = result.output or ""
+    start = body.find("stdout:\n")
+    assert start != -1
+    after = body[start + len("stdout:\n"):]
+    assert after.startswith("A" * 64)
+    get_settings.cache_clear()  # type: ignore[attr-defined]

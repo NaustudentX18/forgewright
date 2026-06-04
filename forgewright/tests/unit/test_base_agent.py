@@ -69,3 +69,33 @@ async def test_manus_prepends_system_prompt() -> None:
     messages = result.messages
     assert messages[0].role == "system"
     assert "Manus" in messages[0].content
+
+
+def test_memory_max_messages_from_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H0.8d: Memory reads its maxlen from Settings.agent.memory_max_messages."""
+    from forgewright.agent import Memory
+    from forgewright.config import Settings
+
+    custom = Settings(agent={"memory_max_messages": 5})  # type: ignore[arg-type]
+    monkeypatch.setattr("forgewright.agent.base.get_settings", lambda: custom)
+    mem = Memory()
+    # Append 8 messages; deque(maxlen=5) keeps the last 5 only.
+    for i in range(8):
+        mem.append(ChatMessage(role="user", content=f"m{i}"))
+    assert len(mem) == 5
+    snapshot = mem.snapshot()
+    assert snapshot[0].content == "m3"
+    assert snapshot[-1].content == "m7"
+
+
+def test_memory_explicit_max_messages_wins_over_settings() -> None:
+    """H0.8d: an explicit max_messages argument to Memory() still wins
+    (caller-driven override; Settings is the default)."""
+    from forgewright.agent import Memory
+
+    mem = Memory(max_messages=3)
+    for i in range(5):
+        mem.append(ChatMessage(role="user", content=f"m{i}"))
+    assert len(mem) == 3

@@ -6,11 +6,15 @@ fallback) and the :class:`CostTracker` accumulator.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from forgewright.cost import (
     PRICING_PER_MILLION,
     CostTracker,
     cost_for,
+    load_pricing_table,
 )
 
 # --------------------------------------------------------------------------- #
@@ -132,3 +136,72 @@ def test_tracker_breakdown_keys() -> None:
     tracker = CostTracker(model="stub/stub-model")
     bd = tracker.breakdown()
     assert set(bd.keys()) == {"input", "output", "total"}
+
+
+# --------------------------------------------------------------------------- #
+# H0.8b: external pricing table (Settings.cost.pricing_table)
+# --------------------------------------------------------------------------- #
+
+
+def test_load_pricing_table_from_file(tmp_path: Path) -> None:
+    """H0.8b: a JSON pricing table is loaded and used to price models."""
+    path = tmp_path / "pricing.json"
+    path.write_text(
+        json.dumps(
+            {
+                "vendor/custom-model": {"input": 7.0, "output": 21.0},
+                "_default": {"input": 1.0, "output": 2.0},
+            }
+        ),
+        encoding="utf-8",
+    )
+    table = load_pricing_table(path)
+    assert table["vendor/custom-model"]["input"] == 7.0
+    assert table["vendor/custom-model"]["output"] == 21.0
+    # The raw table carries the explicit _default row; resolution
+    # happens in cost_for / CostTracker.breakdown, not here.
+    assert table["_default"]["input"] == 1.0
+    assert "_default" in table
+
+
+def test_load_pricing_table_missing_file_falls_back() -> None:
+    """H0.8b: a missing file falls back to the in-code PRICING_PER_MILLION."""
+    table = load_pricing_table("/nonexistent/pricing.json")
+    assert "anthropic/claude-sonnet-4-6" in table
+    assert table["anthropic/claude-sonnet-4-6"]["input"] == 3.0
+
+
+def test_load_pricing_table_malformed_falls_back(tmp_path: Path) -> None:
+    """H0.8b: malformed JSON falls back to the in-code default."""
+    path = tmp_path / "bad.json"
+    path.write_text("not valid json{", encoding="utf-8")
+    table = load_pricing_table(path)
+    assert "anthropic/claude-sonnet-4-6" in table
+
+
+def test_settings_pricing_table_path_used_by_cost_for(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """H0.8b: cost_for consults Settings.cost.pricing_table."""
+    from forgewright.config import Settings, get_settings
+
+    path = tmp_path / "pricing.json"
+    path.write_text(
+        json.dumps(
+            {
+                "vendor/custom-model": {"input": 9.0, "output": 27.0},
+                "_default": {"input": 0.0, "output": 0.0},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FORGEWRIGHT_COST__PRICING_TABLE", str(path))
+    get_settings.cache_clear()  # type: ignore[attr-defined]
+    try:
+        # A model not in the in-code table now uses the on-disk price.
+        assert cost_for("vendor/custom-model", 1_000_000, 0) == 9.0
+        assert cost_for("vendor/custom-model", 0, 1_000_000) == 27.0
+    finally:
+        get_settings.cache_clear()  # type: ignore[attr-defined]
+    # Re-pin the in-code table so the rest of the suite keeps passing.
+    _ = Settings()

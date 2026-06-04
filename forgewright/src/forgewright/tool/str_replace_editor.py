@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections import deque
 from pathlib import Path
 from typing import Any, ClassVar
@@ -100,29 +99,29 @@ class StrReplaceEditor(BaseTool):
             return ToolResult(is_error=True, error=str(exc))
 
         if command == "view":
-            return await asyncio.to_thread(self._view, target, view_range)
+            return self._view(target, view_range)
         if command == "create":
             if file_text is None:
                 return ToolResult(
                     is_error=True, error="`file_text` is required for command='create'."
                 )
-            return await asyncio.to_thread(self._create, target, file_text)
+            return self._create(target, file_text)
         if command == "str_replace":
             if old_str is None or new_str is None:
                 return ToolResult(
                     is_error=True,
                     error="`old_str` and `new_str` are required for command='str_replace'.",
                 )
-            return await asyncio.to_thread(self._str_replace, target, old_str, new_str)
+            return self._str_replace(target, old_str, new_str)
         if command == "insert":
             if new_str is None or insert_line is None:
                 return ToolResult(
                     is_error=True,
                     error="`new_str` and `insert_line` are required for command='insert'.",
                 )
-            return await asyncio.to_thread(self._insert, target, insert_line, new_str)
+            return self._insert(target, insert_line, new_str)
         if command == "undo_edit":
-            return await asyncio.to_thread(self._undo_edit, target)
+            return self._undo_edit(target)
         return ToolResult(is_error=True, error=f"Unknown command: {command}")
 
     def _resolve_path(self, path: str, allow_outside: bool) -> Path:

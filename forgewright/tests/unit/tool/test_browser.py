@@ -14,6 +14,7 @@ default test run.
 from __future__ import annotations
 
 import base64
+import os
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -407,6 +408,10 @@ async def test_close_via_action() -> None:
 @pytest.mark.integration
 @pytest.mark.slow
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    not os.environ.get("FORGEWRIGHT_BROWSER_INTEGRATION"),
+    reason="set FORGEWRIGHT_BROWSER_INTEGRATION=1 to run live browser integration",
+)
 async def test_browser_live_example_com() -> None:
     """Actually drive a real Chromium to example.com and grab the title.
 

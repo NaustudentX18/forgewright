@@ -215,10 +215,14 @@ async def test_num_results_is_passed_through(monkeypatch: pytest.MonkeyPatch) ->
     tool = WebSearchTool()
     seen: list[int] = []
 
+    async def empty_google(query: str, num: int) -> list[SearchResult]:
+        return []
+
     async def fake_ddg(query: str, num: int) -> list[SearchResult]:
         seen.append(num)
         return _make_results(num)
 
+    monkeypatch.setattr(tool, "_search_google", empty_google)
     monkeypatch.setattr(tool, "_search_duckduckgo", fake_ddg)
 
     res = await tool(query="x", num_results=7)

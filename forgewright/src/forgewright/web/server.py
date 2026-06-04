@@ -37,8 +37,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import mimetypes
 import time
-from collections.abc import AsyncGenerator, Iterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,13 +48,11 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import (
-    FileResponse,
     HTMLResponse,
     PlainTextResponse,
     RedirectResponse,
     StreamingResponse,
 )
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from forgewright import __version__
@@ -259,34 +258,36 @@ async def stream_agent_run(
     original_tools = agent.tools
     agent.tools = _ObservableToolCollection(original_tools, buf.events)  # type: ignore[assignment]
     try:
-        result = await agent.run(user_msg.content, max_steps=agent.max_steps)
-    except Exception as exc:
-        logger.exception("web.agent_run error")
-        buf.error = f"{type(exc).__name__}: {exc}"
-        buf.events.append({"event": "error", "data": {"message": buf.error}})
-        return
+        try:
+            result = await agent.run(user_msg.content, max_steps=agent.max_steps)
+        except Exception as exc:
+            logger.exception("web.agent_run error")
+            buf.error = f"{type(exc).__name__}: {exc}"
+            buf.events.append({"event": "error", "data": {"message": buf.error}})
+            return
+
+        if result.state.value == "error":
+            buf.error = result.output or "agent error"
+            buf.events.append({"event": "error", "data": {"message": buf.error}})
+
+        final_text = result.output or ""
+        if final_text:
+            session.messages.append(ChatMessage(role="assistant", content=final_text))
+            buf.assistant_text = final_text
+        # Stream ``final_text`` to the UI word-by-word so the client can
+        # render a typewriter effect (event: token). We chunk on whitespace
+        # so multi-byte / punctuation tokens stay intact; the final
+        # ``event: final`` carries the full text for any non-streaming
+        # consumer (and so the session reload still works correctly).
+        for chunk in _tokenize(final_text):
+            buf.events.append({"event": "token", "data": {"content": chunk}})
+        buf.events.append({"event": "final", "data": {"content": final_text}})
     finally:
         # Always restore the original tools so future invocations
-        # behave normally.
+        # behave normally. Mark the buffer done only after final/error
+        # events are queued so SSE readers cannot exit before consuming them.
         agent.tools = original_tools
         buf.done.set()
-
-    if result.state.value == "error":
-        buf.error = result.output or "agent error"
-        buf.events.append({"event": "error", "data": {"message": buf.error}})
-
-    final_text = result.output or ""
-    if final_text:
-        session.messages.append(ChatMessage(role="assistant", content=final_text))
-        buf.assistant_text = final_text
-    # Stream ``final_text`` to the UI word-by-word so the client can
-    # render a typewriter effect (event: token). We chunk on whitespace
-    # so multi-byte / punctuation tokens stay intact; the final
-    # ``event: final`` carries the full text for any non-streaming
-    # consumer (and so the session reload still works correctly).
-    for chunk in _tokenize(final_text):
-        buf.events.append({"event": "token", "data": {"content": chunk}})
-    buf.events.append({"event": "final", "data": {"content": final_text}})
 
 
 async def _sse_event_stream(
@@ -329,7 +330,7 @@ async def _sse_event_stream(
             await runner
         except (asyncio.CancelledError, asyncio.IncompleteReadError):
             pass
-        except Exception as exc:  # noqa: BLE001 — last-line logging
+        except Exception as exc:
             logger.warning(
                 "web.sse.runner_error session_id={} err={!r}",
                 session_id,
@@ -380,12 +381,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings_override = settings
 
-    if _STATIC_DIR.exists():
-        app.mount(
-            "/static",
-            StaticFiles(directory=str(_STATIC_DIR)),
-            name="static",
-        )
+    def _static_response(path: Path) -> Response:
+        """Serve static assets without Starlette's thread-pool file wrapper.
+
+        The bundled UI files are small enough to read eagerly, and doing so
+        keeps the web smoke tests deterministic on constrained CI hosts where
+        ``FileResponse``/``StaticFiles`` can block waiting for AnyIO workers.
+        """
+        media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        return Response(content=path.read_bytes(), media_type=media_type)
 
     def _settings() -> Settings:
         if app.state.settings_override is not None:
@@ -412,13 +416,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # ---- routes --------------------------------------------------------- #
 
+    @app.get("/static/{asset_path:path}", include_in_schema=False)
+    async def static_asset(asset_path: str) -> Response:
+        """Serve a bundled static UI asset."""
+        root = _STATIC_DIR.resolve()
+        path = (root / asset_path).resolve()
+        if not path.is_file() or root not in path.parents:
+            raise HTTPException(status_code=404, detail="static asset not found")
+        return _static_response(path)
+
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-    async def root() -> FileResponse:
+    async def root() -> Response:
         """Serve the single-page chat UI."""
         index = _STATIC_DIR / "index.html"
         if not index.exists():
             raise HTTPException(status_code=404, detail="UI not built")
-        return FileResponse(str(index))
+        return _static_response(index)
 
     def _share_redirect(
         *,
@@ -472,7 +485,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             chunks.append(chunk)
         # Cache the bounded body so ``request.form()`` re-parses it
         # rather than re-reading the network stream.
-        request._body = b"".join(chunks)  # type: ignore[attr-defined]
+        request._body = b"".join(chunks)
 
         form = await request.form()
         title = str(form.get("title") or "")
@@ -570,7 +583,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         safe_sid = session_id.replace('"', '\\"')
         expr = f'session_id="{safe_sid}"'
 
-        def event_source() -> Iterator[str]:
+        async def event_source() -> AsyncGenerator[str, None]:
             for ev in query_stream(log_path, since=start, expr=expr):
                 yield json.dumps(ev.to_dict(include_hash=True), ensure_ascii=False) + "\n"
 
@@ -599,7 +612,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/messages")
     async def post_message(
-        session_id: str, body: MessageRequest, request: Request
+        session_id: str, body: MessageRequest
     ) -> StreamingResponse:
         if not body.content.strip():
             raise HTTPException(status_code=422, detail="content must be non-empty")
@@ -620,8 +633,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 sessions_dir=sessions_dir,
                 agent=agent,
             ):
-                if await request.is_disconnected():
-                    break
                 yield chunk
 
         return StreamingResponse(event_source(), media_type="text/event-stream")

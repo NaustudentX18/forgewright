@@ -21,6 +21,8 @@ class LLMConfig(BaseModel):
     base_url: str | None = None
     max_tokens: int = 4096
     temperature: float = 1.0
+    context_tokens_default: int = 128_000
+    drop_params: bool = True
 
 
 class SandboxConfig(BaseModel):
@@ -52,6 +54,42 @@ class SecurityConfig(BaseModel):
     trust: str = Field(default_factory=_default_trust)
 
 
+def _default_pricing_table() -> str:
+    return str(Path.home() / ".config" / "forgewright" / "pricing.json")
+
+
+class CostConfig(BaseModel):
+    """Token cost tracking + per-session caps (H2.3)."""
+
+    pricing_table: str = Field(default_factory=_default_pricing_table)
+    # Per-session USD cap. ``float("inf")`` (the default) disables the cap;
+    # a value of 0 is treated identically — there is no "free call" budget.
+    max_usd_per_session: float = float("inf")
+    # Per-session iteration cap. ``0`` disables the cap; a positive value
+    # is enforced before every LLM call.
+    max_iterations_per_session: int = 0
+
+
+class ToolsConfig(BaseModel):
+    """Cross-tool limits."""
+
+    max_output_chars: int = 50_000
+
+
+class AgentConfig(BaseModel):
+    """Agent-level defaults (memory, etc)."""
+
+    memory_max_messages: int = 200
+
+
+class FlowConfig(BaseModel):
+    """PlanningFlow step + timeout budgets."""
+
+    max_total_steps: int = 50
+    per_agent_max_steps: int = 25
+    timeout_s: int = 600
+
+
 class Settings(BaseSettings):
     """Top-level configuration, loaded once as a thread-safe singleton."""
 
@@ -65,6 +103,10 @@ class Settings(BaseSettings):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    cost: CostConfig = Field(default_factory=CostConfig)
+    tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    agent: AgentConfig = Field(default_factory=AgentConfig)
+    flow: FlowConfig = Field(default_factory=FlowConfig)
     max_steps: int = 8
     workspace: str = "./workspace"
     logs: str = "./logs"
@@ -77,4 +119,14 @@ def get_settings() -> Settings:
     return Settings()
 
 
-__all__ = ["LLMConfig", "SandboxConfig", "SecurityConfig", "Settings", "get_settings"]
+__all__ = [
+    "AgentConfig",
+    "CostConfig",
+    "FlowConfig",
+    "LLMConfig",
+    "SandboxConfig",
+    "SecurityConfig",
+    "Settings",
+    "ToolsConfig",
+    "get_settings",
+]

@@ -1,4 +1,5 @@
 """Textual TUI — sidebar + message pane over the web SSE API."""
+# mypy: disable-error-code="misc,untyped-decorator"
 
 from __future__ import annotations
 

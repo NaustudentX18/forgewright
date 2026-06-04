@@ -56,3 +56,55 @@ def test_settings_paths_use_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         assert str(tmp_path) in settings.security.audit_log
     finally:
         get_settings.cache_clear()  # type: ignore[attr-defined]
+
+
+# --------------------------------------------------------------------------- #
+# H0.8a-f: new sub-configs and defaults
+# --------------------------------------------------------------------------- #
+
+
+def test_llm_config_has_context_tokens_default() -> None:
+    """H0.8a: Settings.llm.context_tokens_default exists with a sane default."""
+    assert LLMConfig().context_tokens_default == 128_000
+
+
+def test_llm_config_has_drop_params() -> None:
+    """H0.8f: LLMConfig.drop_params defaults to True (safety net)."""
+    assert LLMConfig().drop_params is True
+    assert LLMConfig(drop_params=False).drop_params is False
+
+
+def test_settings_cost_pricing_table_default() -> None:
+    """H0.8b: Settings.cost.pricing_table defaults to
+    ~/.config/forgewright/pricing.json."""
+    from forgewright.config import Settings
+
+    s = Settings()
+    assert s.cost.pricing_table.endswith("pricing.json")
+    assert ".config" in s.cost.pricing_table
+
+
+def test_settings_tools_max_output_chars() -> None:
+    """H0.8c: Settings.tools.max_output_chars defaults to 50_000."""
+    from forgewright.config import Settings
+
+    s = Settings()
+    assert s.tools.max_output_chars == 50_000
+
+
+def test_settings_agent_memory_max_messages() -> None:
+    """H0.8d: Settings.agent.memory_max_messages defaults to 200."""
+    from forgewright.config import Settings
+
+    s = Settings()
+    assert s.agent.memory_max_messages == 200
+
+
+def test_settings_flow_defaults() -> None:
+    """H0.8e: Settings.flow has the three budget knobs with documented defaults."""
+    from forgewright.config import Settings
+
+    s = Settings()
+    assert s.flow.max_total_steps == 50
+    assert s.flow.per_agent_max_steps == 25
+    assert s.flow.timeout_s == 600

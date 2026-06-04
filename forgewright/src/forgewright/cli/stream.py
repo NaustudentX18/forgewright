@@ -26,6 +26,7 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 
+from forgewright.agent import AgentState
 from forgewright.logger import logger
 
 if TYPE_CHECKING:
@@ -108,7 +109,10 @@ async def stream_agent_run(agent: BaseAgent, prompt: str) -> AgentResult:
 
     title = "[bold green]forgewright[/bold green]"
     subtitle = f"[dim]{result.step_count} steps · {result.state.value}[/dim]"
-    border = "green" if result.state.value == "finished" else "red"
+    if result.state in (AgentState.COST_LIMIT_REACHED, AgentState.ITERATION_LIMIT_REACHED):
+        border = "yellow"
+    else:
+        border = "green" if result.state.value == "finished" else "red"
 
     console.print(
         Panel(

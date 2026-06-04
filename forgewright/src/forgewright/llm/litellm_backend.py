@@ -31,7 +31,6 @@ from forgewright.schema import (
 
 # Quieten litellm's own log lines — we already have loguru configured.
 litellm.suppress_debug_info = True
-litellm.drop_params = True  # silently drop params a provider doesn't accept
 
 
 class LiteLLMBackend(LLMBackend):
@@ -85,6 +84,7 @@ class LiteLLMBackend(LLMBackend):
             "temperature": self._config.temperature,
             "max_tokens": self._config.max_tokens,
             "stream": stream,
+            "drop_params": self._config.drop_params,
         }
         # API key: only set if provided (env fallback handled by litellm).
         if self._config.api_key:
@@ -126,9 +126,9 @@ class LiteLLMBackend(LLMBackend):
             return []
         # If the caller already passed OpenAI-shaped dicts, use them as-is.
         if isinstance(tools[0], dict):
-            return list(tools)  # type: ignore[list-item]
+            return list(tools)
         # Otherwise each entry is a ToolSpec (Pydantic model with .name etc.).
-        specs = [t for t in tools if isinstance(t, ToolSpec)]  # type: ignore[union-attr]
+        specs = [t for t in tools if isinstance(t, ToolSpec)]
         return [
             {
                 "type": "function",
@@ -239,9 +239,29 @@ class LiteLLMBackend(LLMBackend):
         )
 
     def max_context_tokens(self) -> int:
-        """Per-provider default. LiteLLM also exposes per-model lookups
-        via ``litellm.get_max_tokens(model)``; we keep it simple for now."""
-        return self.DEFAULT_CONTEXT_TOKENS.get(self._config.provider, 128_000)
+        """Per-model context window.
+
+        Lookup order: ``litellm.get_model_info(model).max_input_tokens`` →
+        ``DEFAULT_CONTEXT_TOKENS[provider]`` (per-provider) →
+        ``Settings.llm.context_tokens_default`` (user-configured fallback).
+        """
+        value: Any | None = None
+        try:
+            info: Any = litellm.get_model_info(self._model_string)
+        except Exception:  # litellm raises broadly on unknown models
+            info = None
+        if isinstance(info, dict):
+            value = info.get("max_input_tokens")
+        else:
+            value = getattr(info, "max_input_tokens", None)
+        if value is not None:
+            return int(value)
+        provider_default = self.DEFAULT_CONTEXT_TOKENS.get(self._config.provider)
+        if provider_default is not None:
+            return provider_default
+        from forgewright.config import get_settings
+
+        return get_settings().llm.context_tokens_default
 
     def supports_tool_calling(self) -> bool:
         """Every provider we route through LiteLLM supports tool calls.

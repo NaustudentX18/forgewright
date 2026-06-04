@@ -1,4 +1,4 @@
-"""BashTool — run a shell command via asyncio subprocess.
+"""BashTool — run a shell command via subprocess.
 
 The denylist is enforced before execution. Commands whose first token is
 a member of ``SAFE_BUILTINS`` are passed through without ceremony;
@@ -13,10 +13,12 @@ wiring — see ``cli.trust`` and the Manus agent bootstrap).
 
 from __future__ import annotations
 
-import asyncio
 import os
+import shutil
+import subprocess
 from typing import Any, ClassVar
 
+from forgewright.config import get_settings
 from forgewright.logger import logger
 from forgewright.schema import ToolResult
 from forgewright.security.approval import ApprovalDecision, ApprovalFlow
@@ -27,8 +29,14 @@ from forgewright.tool.base import BaseTool
 __all__ = ["BashTool"]
 
 
-# Truncate stdout / stderr at 100 KiB each to keep tool results bounded.
-_MAX_OUTPUT_CHARS = 100_000
+def _max_output_chars() -> int:
+    """Per-stream truncation cap, sourced from Settings."""
+    return get_settings().tools.max_output_chars
+
+
+def _shell_executable() -> str:
+    """Resolve a stable shell executable for subprocess execution."""
+    return shutil.which("sh") or "/bin/sh"
 
 
 class BashTool(BaseTool):
@@ -124,14 +132,24 @@ class BashTool(BaseTool):
         if env:
             proc_env = {**os.environ, **env}
 
-        # 3. Spawn the shell.
+        # 3. Spawn the shell. Use synchronous subprocess.run with its
+        # own timeout instead of asyncio subprocess helpers: in some
+        # uv-managed environments the async child watcher can hang
+        # after a child exits. This blocks the tool coroutine while the
+        # command runs, but preserves the public per-call timeout.
         try:
-            proc = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            proc = subprocess.run(
+                [_shell_executable(), "-c", cmd],
+                capture_output=True,
                 cwd=cwd,
                 env=proc_env,
+                timeout=timeout_s,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return ToolResult(
+                is_error=True,
+                error=f"Command timed out after {timeout_s}s: {cmd[:100]}",
             )
         except Exception as exc:
             logger.warning("bash.spawn_failed cmd={} err={}", cmd[:200], exc)
@@ -140,34 +158,21 @@ class BashTool(BaseTool):
                 error=f"Failed to spawn: {type(exc).__name__}: {exc}",
             )
 
-        # 4. Run with timeout.
-        try:
-            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
-        except TimeoutError:
-            try:
-                proc.kill()
-            finally:
-                await proc.wait()
-            return ToolResult(
-                is_error=True,
-                error=f"Command timed out after {timeout_s}s: {cmd[:100]}",
-            )
-
+        # 4. Decode captured output.
+        stdout_b = proc.stdout or b""
+        stderr_b = proc.stderr or b""
         stdout = stdout_b.decode("utf-8", errors="replace")
         stderr = stderr_b.decode("utf-8", errors="replace")
         exit_code = proc.returncode
 
-        # 5. Truncate at 100 KiB each.
+        # 5. Truncate at the configured cap (per stream).
+        cap = _max_output_chars()
         truncated_parts: list[str] = []
-        if len(stdout) > _MAX_OUTPUT_CHARS:
-            stdout = stdout[:_MAX_OUTPUT_CHARS] + (
-                f"\n... [truncated {len(stdout_b) - _MAX_OUTPUT_CHARS} chars]"
-            )
+        if len(stdout) > cap:
+            stdout = stdout[:cap] + (f"\n... [truncated {len(stdout_b) - cap} chars]")
             truncated_parts.append("stdout truncated")
-        if len(stderr) > _MAX_OUTPUT_CHARS:
-            stderr = stderr[:_MAX_OUTPUT_CHARS] + (
-                f"\n... [truncated {len(stderr_b) - _MAX_OUTPUT_CHARS} chars]"
-            )
+        if len(stderr) > cap:
+            stderr = stderr[:cap] + (f"\n... [truncated {len(stderr_b) - cap} chars]")
             truncated_parts.append("stderr truncated")
         truncation_note = f" ({'; '.join(truncated_parts)})" if truncated_parts else ""
 
