@@ -1,6 +1,6 @@
 [project]
 name = "forgewright"
-version = "0.1.0"
+version = "0.2.0"
 description = "An open-source, CLI-first AI agent framework. Bring your own keys, run on your own box."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"

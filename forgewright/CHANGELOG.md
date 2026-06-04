@@ -6,7 +6,7 @@ project adheres to [CalVer](https://calver.org/) (`YYYY.MM.PATCH`).
 
 ---
 
-## [Unreleased]
+## [0.2.0] - 2026-06-04
 
 ### Fixed
 - **`app.js` was truncated at the top of the file** (missing the IIFE,
@@ -220,4 +220,4 @@ tour, and [`BUILD_PLAN.md`](./BUILD_PLAN.md) for the full roadmap.
 
 ---
 
-*Last updated 2026-06-02.*
+*Last updated 2026-06-04.*

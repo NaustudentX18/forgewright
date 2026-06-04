@@ -23,7 +23,7 @@ def test_python_dash_m_works(tmp_path: Path) -> None:
     )
     assert result.returncode == 0
     assert "forgewright" in result.stdout
-    assert "0.1.0" in result.stdout
+    assert "0.2.0" in result.stdout
 
 
 def test_help_prints(tmp_path: Path) -> None:
