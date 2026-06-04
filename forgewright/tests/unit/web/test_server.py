@@ -14,7 +14,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from forgewright import __version__
-from forgewright.config import LLMConfig, Settings
+from forgewright.config import LLMConfig, SecurityConfig, Settings
+from forgewright.security.audit import AuditLog
+from forgewright.security.audit import AuditEvent
 from forgewright.session import Session
 from forgewright.web.server import app as default_app
 from forgewright.web.server import create_app
@@ -42,11 +44,37 @@ def stub_settings() -> Settings:
 
 
 @pytest.fixture
+def audit_log_path(tmp_path: Path) -> Path:
+    """A tmp path for the audit log used by the events endpoint."""
+    return tmp_path / "audit.jsonl"
+
+
+@pytest.fixture
+def stub_settings_with_audit(audit_log_path: Path) -> Settings:
+    """Stub settings with the audit log pointed at ``audit_log_path``."""
+    return Settings(
+        llm=LLMConfig(provider="stub", model="stub-model"),
+        max_steps=2,
+        security=SecurityConfig(audit_log=str(audit_log_path)),
+    )
+
+
+@pytest.fixture
 def client(
     sessions_dir: Path, stub_settings: Settings
 ) -> Iterator[TestClient]:
     """A FastAPI TestClient wired with a stub-backed app."""
     application = create_app(settings=stub_settings)
+    with TestClient(application) as c:
+        yield c
+
+
+@pytest.fixture
+def audit_client(
+    sessions_dir: Path, stub_settings_with_audit: Settings
+) -> Iterator[TestClient]:
+    """A TestClient whose ``/events`` endpoint reads from a tmp audit log."""
+    application = create_app(settings=stub_settings_with_audit)
     with TestClient(application) as c:
         yield c
 
@@ -616,3 +644,156 @@ def test_manifest_icon_maskable_is_512_png(client: TestClient) -> None:
     w, h = struct.unpack(">II", body[16:24])
     assert w == 512
     assert h == 512
+
+
+# --------------------------------------------------------------------------- #
+# H1.1 — Append-only log fan-out (``?since=`` polling)
+# --------------------------------------------------------------------------- #
+
+
+def _seed_audit_log(audit_log_path: Path, session_id: str, n: int) -> AuditLog:
+    """Append ``n`` events with ``session_id`` and return the log."""
+    log = AuditLog(audit_log_path)
+    for i in range(n):
+        log.append(
+            AuditEvent(
+                session_id=session_id,
+                type="tool",
+                tool="Bash",
+                args={"cmd": f"echo {i}"},
+            )
+        )
+    return log
+
+
+def test_events_endpoint_streams_new_events(
+    audit_client: TestClient, audit_log_path: Path
+) -> None:
+    """``?since=0`` returns every audit event for the session, one per line.
+
+    This is the H1.1 polling contract: the client passes the last byte
+    offset it saw (initially 0) and gets back the events appended
+    after that offset. Two appended events, ``?since=0`` → 2 events.
+    """
+    sess = audit_client.post("/api/sessions", json={}).json()
+    sid = sess["id"]
+    _seed_audit_log(audit_log_path, sid, 2)
+
+    r = audit_client.get(f"/api/sessions/{sid}/events", params={"since": "0"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/x-ndjson")
+
+    lines = [line for line in r.text.split("\n") if line]
+    assert len(lines) == 2, f"expected 2 events, got: {lines!r}"
+    payloads = [__import__("json").loads(line) for line in lines]
+    assert all(p["session_id"] == sid for p in payloads)
+    # The X-Current-Offset header tells the client where to poll next.
+    current = int(r.headers["X-Current-Offset"])
+    assert current == audit_log_path.stat().st_size
+
+
+def test_events_endpoint_filters_by_session(
+    audit_client: TestClient, audit_log_path: Path
+) -> None:
+    """Events for other sessions in the same log are not leaked."""
+    sess = audit_client.post("/api/sessions", json={}).json()
+    sid = sess["id"]
+    log = AuditLog(audit_log_path)
+    log.append(AuditEvent(session_id="other", type="tool", tool="Bash"))
+    log.append(AuditEvent(session_id=sid, type="tool", tool="Bash"))
+    log.append(AuditEvent(session_id="other", type="tool", tool="WebSearch"))
+
+    r = audit_client.get(f"/api/sessions/{sid}/events", params={"since": "0"})
+    import json as _json
+    payloads = [_json.loads(line) for line in r.text.split("\n") if line]
+    assert len(payloads) == 1
+    assert payloads[0]["session_id"] == sid
+
+
+def test_events_endpoint_tail_returns_from_end(
+    audit_client: TestClient, audit_log_path: Path
+) -> None:
+    """``?since=-1`` returns zero events when nothing has been appended
+    since the request. The ``X-Current-Offset`` header tells the client
+    where to poll next."""
+    sess = audit_client.post("/api/sessions", json={}).json()
+    sid = sess["id"]
+    _seed_audit_log(audit_log_path, sid, 2)
+
+    # -1 and "tail" are both valid synonyms for "from EOF".
+    for sentinel in ("-1", "tail"):
+        r = audit_client.get(
+            f"/api/sessions/{sid}/events", params={"since": sentinel}
+        )
+        assert r.status_code == 200
+        # No events past the EOF we recorded.
+        assert r.text.strip() == ""
+        # And the offset header equals the current file size, so the
+        # client can use it for the next poll.
+        assert int(r.headers["X-Current-Offset"]) == audit_log_path.stat().st_size
+
+
+def test_events_endpoint_polling_offset_advances(
+    audit_client: TestClient, audit_log_path: Path
+) -> None:
+    """Round-trip: poll until empty, append, poll again, get only the new events.
+
+    This is the canonical polling pattern the H1.1 endpoint enables.
+    """
+    import json as _json
+
+    sess = audit_client.post("/api/sessions", json={}).json()
+    sid = sess["id"]
+
+    # First poll with the log empty — nothing to stream, but the
+    # header tells us where the end is.
+    r1 = audit_client.get(f"/api/sessions/{sid}/events", params={"since": "0"})
+    assert r1.status_code == 200
+    assert r1.text.strip() == ""
+    offset_after_first = int(r1.headers["X-Current-Offset"])
+
+    # Append two events. Their bytes start at ``offset_after_first``.
+    log = AuditLog(audit_log_path)
+    log.append(AuditEvent(session_id=sid, type="tool", tool="Bash", args={"cmd": "1"}))
+    log.append(AuditEvent(session_id=sid, type="tool", tool="Bash", args={"cmd": "2"}))
+
+    # Second poll from the recorded offset — exactly the two new events.
+    r2 = audit_client.get(
+        f"/api/sessions/{sid}/events", params={"since": str(offset_after_first)}
+    )
+    payloads = [_json.loads(line) for line in r2.text.split("\n") if line]
+    assert [p["args"]["cmd"] for p in payloads] == ["1", "2"]
+
+
+def test_events_endpoint_rejects_non_integer_since(
+    audit_client: TestClient,
+) -> None:
+    """An unparseable ``since`` returns 400 with a useful error."""
+    sess = audit_client.post("/api/sessions", json={}).json()
+    sid = sess["id"]
+    r = audit_client.get(f"/api/sessions/{sid}/events", params={"since": "abc"})
+    assert r.status_code == 400
+    assert "since" in r.json()["detail"].lower()
+
+
+def test_events_endpoint_rejects_negative_offset(
+    audit_client: TestClient,
+) -> None:
+    """A negative ``since`` other than ``-1`` returns 400.
+
+    ``-1`` is reserved for "from EOF" (and ``tail`` is the alias); any
+    other negative number is almost certainly a client bug."""
+    sess = audit_client.post("/api/sessions", json={}).json()
+    sid = sess["id"]
+    r = audit_client.get(f"/api/sessions/{sid}/events", params={"since": "-5"})
+    assert r.status_code == 400
+
+
+def test_events_endpoint_unknown_session_404(audit_client: TestClient) -> None:
+    """Asking for events of a session that doesn't exist returns 404.
+
+    We check the session first (not the audit log) so a typo in the
+    URL surfaces immediately instead of streaming an empty body.
+    """
+    r = audit_client.get("/api/sessions/does-not-exist/events")
+    assert r.status_code == 404

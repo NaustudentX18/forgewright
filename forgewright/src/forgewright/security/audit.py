@@ -23,15 +23,16 @@ import csv
 import hashlib
 import io
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from forgewright.logger import logger
 from forgewright.security.audit_query import event_matches_query, parse_audit_query
 
-__all__ = ["AuditEvent", "AuditLog", "AuditVerifyResult"]
+__all__ = ["AuditEvent", "AuditLog", "AuditVerifyResult", "query_stream"]
 
 
 # 64-char hex string used as the prev_hash of the very first event.
@@ -61,6 +62,105 @@ def _compute_hash(event_dict: dict[str, Any], prev_hash: str) -> str:
     payload = {**event_dict, "hash": None}
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(encoded + prev_hash.encode("utf-8")).hexdigest()
+
+
+def _seek_to_line_boundary(f: TextIO, offset: int, file_size: int) -> int:
+    """Seek ``f`` to ``offset`` and advance past any partial line.
+
+    If the byte at ``offset - 1`` is not a newline (i.e. the caller
+    passed an offset that lands mid-line), the partial line is
+    discarded and we resume at the next newline. This means a client
+    that tracks a stale ``since`` after a concurrent append never sees
+    a half-formed event — the cost is at most one missed event.
+
+    Returns the new file position so the caller can update its
+    offset cursor.
+    """
+    if offset <= 0:
+        f.seek(0)
+        return 0
+    if offset >= file_size:
+        f.seek(0, 2)
+        return file_size
+    f.seek(offset - 1)
+    prev = f.read(1)
+    if prev == "\n":
+        f.seek(offset)
+        return offset
+    # Mid-line offset: skip the partial line so the next read starts
+    # on a clean boundary.
+    f.seek(offset)
+    f.readline()
+    return f.tell()
+
+
+def query_stream(
+    path: str | Path,
+    *,
+    since: int = 0,
+    expr: str = "",
+) -> Iterator[AuditEvent]:
+    """Stream events from a JSONL audit log line by line, optionally filtered.
+
+    Reads the file with O(1) memory per yielded event. The full log
+    is never materialised in RAM, so this scales to 10k+ event logs
+    that would be impractical for :meth:`AuditLog.query` (which uses
+    the in-memory list).
+
+    Parameters
+    ----------
+    path
+        Filesystem path to a ``.jsonl`` audit log.
+    since
+        Byte offset into the file. Events at offsets ``< since`` are
+        skipped. If ``since`` lands mid-line (e.g. a stale cursor
+        from a torn previous read), the partial line is discarded and
+        streaming resumes at the next newline.
+    expr
+        Optional audit-log query expression (see
+        :func:`forgewright.security.audit_query.parse_audit_query`).
+        Empty string yields every event. Errors raised by
+        :func:`parse_audit_query` propagate to the caller — they are
+        not deferred to iteration time so a malformed filter fails
+        fast at the call site.
+
+    Yields
+    ------
+    :class:`AuditEvent`
+        One event per non-empty, parseable line. A malformed final
+        line (e.g. crash tail) is skipped silently, matching
+        :meth:`AuditLog._load_existing`.
+
+    Notes
+    -----
+    A generator that returns no events (e.g. offset past EOF, or no
+    lines match ``expr``) is still a valid iterator and the caller's
+    ``for`` loop simply iterates zero times.
+    """
+    clauses = parse_audit_query(expr) if expr.strip() else []
+    p = Path(path)
+    if not p.exists():
+        return
+    size = p.stat().st_size
+    with p.open("r", encoding="utf-8") as f:
+        if since <= 0:
+            f.seek(0)
+        elif since >= size:
+            f.seek(0, 2)
+        else:
+            _seek_to_line_boundary(f, since, size)
+        for raw in f:
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                # Tolerant of a partial last line (crash tail).
+                continue
+            if clauses and not event_matches_query(obj, clauses):
+                continue
+            yield AuditEvent.from_dict(obj)
 
 
 @dataclass
@@ -243,6 +343,19 @@ class AuditLog:
             for ev in self._events
             if event_matches_query(ev.to_dict(include_hash=True), clauses)
         ]
+
+    def query_stream(self, expr: str = "") -> Iterator[AuditEvent]:
+        """Stream events directly from the audit-log file, optionally filtered.
+
+        Unlike :meth:`query`, this reads the JSONL file line by line and
+        never materialises the full event list. Use it for very large
+        logs (10k+ events) where the in-memory list would be wasteful.
+
+        The generator is not consumed at call time; iteration is
+        lazy. Raises :class:`ValueError` eagerly on a malformed
+        ``expr`` (the same as :meth:`query`).
+        """
+        return query_stream(self.path, expr=expr)
 
     def __len__(self) -> int:
         return len(self._events)

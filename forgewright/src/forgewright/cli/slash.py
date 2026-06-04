@@ -165,23 +165,45 @@ class Phase11BCommands:
         return _CONTINUE
 
     def cmd_add(self, args: list[str]) -> bool:
-        """``/add <path>`` — add a file to the agent's read-set (v0.1 stub)."""
-        path = args[0] if args else "(no path)"
-        self.console.print(
-            f"[yellow]/add[/yellow] {path}: "
-            "files are auto-discovered from the workspace root in v0.1; "
-            "explicit /add lands in v0.2."
-        )
+        """``/add <path>`` — add a file to the session-scoped read-set.
+
+        The read-set is stored at ``session.metadata["read_set"]`` so
+        it round-trips through :meth:`Session.save`. Duplicates are
+        silently de-duplicated so a repeated ``/add`` is idempotent.
+        An attempt to add a path that does not exist on disk prints a
+        warning but does not raise — the read-set is a hint, not a
+        hard contract, and the LLM may add a path before it is
+        created (e.g. a file the agent is about to write).
+        """
+        if not args:
+            self.console.print("[red]/add[/red] usage: /add <path>")
+            return _CONTINUE
+        path = args[0]
+        read_set: list[str] = self.session.metadata.setdefault("read_set", [])
+        if path in read_set:
+            self.console.print(f"[dim]/add[/dim] {path}: already in read-set")
+            return _CONTINUE
+        read_set.append(path)
+        exists = "[green]✓[/green]" if Path(path).exists() else "[yellow]?[/yellow]"
+        self.console.print(f"[green]/add[/green] {exists} {path} (read-set: {len(read_set)})")
         return _CONTINUE
 
     def cmd_drop(self, args: list[str]) -> bool:
-        """``/drop <path>`` — remove a file from the read-set (v0.1 stub)."""
-        path = args[0] if args else "(no path)"
-        self.console.print(
-            f"[yellow]/drop[/yellow] {path}: "
-            "files are auto-discovered from the workspace root in v0.1; "
-            "explicit /drop lands in v0.2."
-        )
+        """``/drop <path>`` — remove a file from the session-scoped read-set.
+
+        A no-op (with a dim message) when the path is not currently
+        in the read-set, so ``/drop`` is idempotent.
+        """
+        if not args:
+            self.console.print("[red]/drop[/red] usage: /drop <path>")
+            return _CONTINUE
+        path = args[0]
+        read_set: list[str] = self.session.metadata.setdefault("read_set", [])
+        if path not in read_set:
+            self.console.print(f"[dim]/drop[/dim] {path}: not in read-set")
+            return _CONTINUE
+        read_set.remove(path)
+        self.console.print(f"[green]/drop[/green] {path} (read-set: {len(read_set)})")
         return _CONTINUE
 
     # ------------------------------------------------------------------ #

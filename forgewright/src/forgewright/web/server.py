@@ -38,7 +38,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -62,6 +62,7 @@ from forgewright.config import Settings, get_settings
 from forgewright.llm import LLMBackend
 from forgewright.logger import logger
 from forgewright.schema import ChatMessage
+from forgewright.security.audit import query_stream
 from forgewright.session import Session, default_sessions_dir
 from forgewright.tool import ToolCollection
 
@@ -515,6 +516,69 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/sessions/{session_id}", response_model=dict[str, Any])
     async def get_session(session_id: str) -> dict[str, Any]:
         return _load_session(session_id).to_dict()
+
+    @app.get("/api/sessions/{session_id}/events")
+    async def get_session_events(
+        session_id: str, since: str = "0"
+    ) -> StreamingResponse:
+        """Stream audit-log events for this session from a byte offset.
+
+        Implements H1.1's append-only log fan-out: clients poll
+        ``?since=<offset>`` to receive only events appended after the
+        last response. Semantics of ``since``:
+
+        * Missing or ``"0"``  — start at the beginning of the file.
+        * ``"-1"`` or ``"tail"`` — start at the current EOF (no events
+          until a follow-up poll after the writer appends).
+        * Any other integer — start at that byte offset; a mid-line
+          offset is rounded up to the next line boundary so a stale
+          cursor never surfaces a half-formed event.
+
+        The response is ``application/x-ndjson`` — one JSON event per
+        line. The current end of the audit log is returned in
+        ``X-Current-Offset`` so the client can poll again with
+        ``?since=<that value>``.
+        """
+        # Confirm the session exists (404 otherwise). The audit log is
+        # global; we just filter it by ``session_id`` via the query
+        # expression passed to :func:`query_stream`.
+        _load_session(session_id)
+        s = _settings()
+        log_path = Path(s.security.audit_log)
+        current_size = log_path.stat().st_size if log_path.exists() else 0
+
+        if since in ("-1", "tail"):
+            start = current_size
+        elif since == "" or since == "0":
+            start = 0
+        else:
+            try:
+                start = int(since)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"invalid 'since' value: {since!r} (expected int, -1, or 'tail')",
+                ) from exc
+            if start < 0:
+                raise HTTPException(
+                    status_code=400, detail="'since' must be >= 0 (use -1 or 'tail' for EOF)"
+                )
+
+        # session_id is a uuid4 hex string — safe to embed as a bare
+        # value in the audit query language. Wrap in quotes anyway to
+        # be defensive against future id formats (e.g. prefixed ids).
+        safe_sid = session_id.replace('"', '\\"')
+        expr = f'session_id="{safe_sid}"'
+
+        def event_source() -> Iterator[str]:
+            for ev in query_stream(log_path, since=start, expr=expr):
+                yield json.dumps(ev.to_dict(include_hash=True), ensure_ascii=False) + "\n"
+
+        return StreamingResponse(
+            event_source(),
+            media_type="application/x-ndjson",
+            headers={"X-Current-Offset": str(current_size)},
+        )
 
     @app.delete("/api/sessions/{session_id}", status_code=204)
     async def delete_session(session_id: str) -> None:

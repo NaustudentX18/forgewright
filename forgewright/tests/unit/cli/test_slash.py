@@ -133,20 +133,65 @@ def test_compact_with_few_messages_is_noop(slash: SlashCommands) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_add_prints_stub_message(slash: SlashCommands, console: Console) -> None:
-    """``/add <path>`` prints the v0.1 stub message."""
+def test_add_registers_path_in_read_set(slash: SlashCommands, console: Console) -> None:
+    """``/add <path>`` appends to session.metadata['read_set'] and prints confirmation."""
     slash.dispatch("/add src/foo.py")
+    assert slash.session.metadata.get("read_set") == ["src/foo.py"]
     out = _out(console)
     assert "src/foo.py" in out
-    assert "v0.1" in out
+    assert "read-set" in out
 
 
-def test_drop_prints_stub_message(slash: SlashCommands, console: Console) -> None:
-    """``/drop <path>`` prints the v0.1 stub message."""
+def test_add_is_idempotent(slash: SlashCommands, console: Console) -> None:
+    """A repeated ``/add`` for the same path does not duplicate the entry."""
+    slash.dispatch("/add src/foo.py")
+    slash.dispatch("/add src/foo.py")
+    assert slash.session.metadata.get("read_set") == ["src/foo.py"]
+
+
+def test_add_existing_file_marks_green(slash: SlashCommands, console: Console, tmp_path: Path) -> None:
+    """A path that exists on disk is marked with a green check."""
+    real = tmp_path / "real.txt"
+    real.write_text("hi", encoding="utf-8")
+    slash.dispatch(f"/add {real}")
+    out = _out(console)
+    assert "✓" in out
+    assert str(real) in slash.session.metadata["read_set"]
+
+
+def test_add_no_args_prints_usage(slash: SlashCommands, console: Console) -> None:
+    """``/add`` with no path prints usage and does not mutate the read-set."""
+    slash.dispatch("/add")
+    assert "read_set" not in slash.session.metadata or slash.session.metadata.get("read_set") == []
+
+
+def test_drop_removes_path_from_read_set(slash: SlashCommands, console: Console) -> None:
+    """``/drop <path>`` removes the path and reports the new count."""
+    slash.dispatch("/add src/foo.py")
     slash.dispatch("/drop src/foo.py")
+    assert slash.session.metadata.get("read_set") == []
     out = _out(console)
     assert "src/foo.py" in out
-    assert "v0.1" in out
+
+
+def test_drop_unknown_path_is_noop(slash: SlashCommands, console: Console) -> None:
+    """``/drop <path>`` for a path not in the read-set prints a dim message and does not raise."""
+    slash.dispatch("/drop src/missing.py")
+    assert slash.session.metadata.get("read_set", []) == []
+
+
+def test_read_set_round_trips_through_save_load(
+    slash: SlashCommands, tmp_path: Path
+) -> None:
+    """The read-set persisted via :meth:`Session.save` is recovered by :meth:`Session.from_dict`."""
+    import json as _json
+
+    slash.dispatch("/add src/a.py")
+    slash.dispatch("/add src/b.py")
+    slash.session.save(tmp_path)
+    raw = (tmp_path / f"{slash.session.id}.json").read_text(encoding="utf-8")
+    loaded = Session.from_dict(_json.loads(raw))
+    assert loaded.metadata.get("read_set") == ["src/a.py", "src/b.py"]
 
 
 # --------------------------------------------------------------------------- #
