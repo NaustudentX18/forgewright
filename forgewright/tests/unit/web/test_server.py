@@ -475,6 +475,46 @@ def test_share_in_get_redirects_to_composer(client: TestClient) -> None:
     assert "new=1" in loc
 
 
+def test_share_in_post_rejects_oversized_content_length(client: TestClient) -> None:
+    """POST /share-in must 413 on Content-Length over the cap."""
+    # 1.5 MB body announced via header; the server must short-circuit.
+    big = b"a" * (1_500_000)
+    r = client.post(
+        "/share-in",
+        content=big,
+        headers={"content-type": "application/octet-stream"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 413
+
+
+def test_share_in_post_streams_and_rejects_lying_length(client: TestClient) -> None:
+    """A client that lies about Content-Length or chunks is also bounded.
+
+    TestClient streams the body, so we send 1.5 MB without setting a
+    truthful Content-Length: the server's chunked read must catch it.
+    """
+    big = b"a" * (1_500_000)
+    r = client.post(
+        "/share-in",
+        content=big,
+        headers={"content-type": "application/octet-stream"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 413
+
+
+def test_share_in_post_accepts_small_payload(client: TestClient) -> None:
+    """A well-formed small POST still works (sanity check)."""
+    r = client.post(
+        "/share-in",
+        data={"title": "t", "text": "body", "url": ""},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/?shared=")
+
+
 def test_app_js_has_offline_outbox(client: TestClient) -> None:
     """Offline sends queue in IndexedDB and show a Queued badge."""
     js = client.get("/static/app.js").text

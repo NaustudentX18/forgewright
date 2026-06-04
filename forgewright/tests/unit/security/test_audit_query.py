@@ -84,3 +84,54 @@ def test_audit_log_query_integration(tmp_path) -> None:
     hits = log.query("tool=bash AND approved=false")
     assert len(hits) == 1
     assert hits[0].session_id == "s0"
+
+
+# ---------------------------------------------------------------------- #
+# Quoted-value syntax
+# ---------------------------------------------------------------------- #
+
+
+def test_parse_quoted_value_with_AND_substring() -> None:
+    """A value containing the literal substring `` AND `` must be queryable."""
+    clauses = parse_audit_query('text="foo AND bar"')
+    assert clauses == [("text", "foo AND bar")]
+
+
+def test_parse_quoted_value_with_whitespace() -> None:
+    """Quoted values preserve internal whitespace."""
+    clauses = parse_audit_query('reason="user said no"')
+    assert clauses == [("reason", "user said no")]
+
+
+def test_parse_quoted_value_with_escaped_quote() -> None:
+    """Escaped ``\\"`` inside a quoted value is preserved as ``"``."""
+    clauses = parse_audit_query(r'note="he said \"hi\""')
+    assert clauses == [("note", 'he said "hi"')]
+
+
+def test_parse_quoted_value_combined_with_bare() -> None:
+    """Bare and quoted clauses can be mixed with AND."""
+    clauses = parse_audit_query('tool=bash AND reason="user said no"')
+    assert clauses == [("tool", "bash"), ("reason", "user said no")]
+
+
+def test_parse_quoted_value_unterminated_raises() -> None:
+    with pytest.raises(ValueError, match="unterminated"):
+        parse_audit_query('text="no close')
+
+
+def test_parse_audit_query_rejects_trailing_and() -> None:
+    with pytest.raises(ValueError, match="AND"):
+        parse_audit_query("tool=bash AND")
+
+
+def test_parse_audit_query_rejects_garbage_between_clauses() -> None:
+    with pytest.raises(ValueError, match="AND"):
+        parse_audit_query("tool=bash OR approved=false")
+
+
+def test_event_matches_quoted_value_with_AND_substring() -> None:
+    """The matching engine must honour the quoted-value parsing."""
+    event = {"text": "foo AND bar"}
+    assert event_matches_query(event, parse_audit_query('text="foo AND bar"'))
+    assert not event_matches_query(event, parse_audit_query('text="baz"'))

@@ -32,6 +32,31 @@ __all__ = [
 REGISTRY_URL: str = "https://registry.modelcontextprotocol.io/v0/servers"
 MCP_CONFIG_PATH: Path = Path.home() / ".config" / "forgewright" / "mcp.json"
 
+#: Strict pattern for the TOML section id (``[mcp.servers.<id>]``).
+#: Lowercase alphanumeric + dash, must start with a letter or digit.
+#: Used to reject registry entries whose name or short alias would
+#: otherwise break the TOML structure (e.g. ``"; INJECTED = 1``).
+_SERVER_ID_RE: re.Pattern[str] = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+
+
+def _is_valid_server_id(server_id: str) -> bool:
+    """Return True if ``server_id`` is a safe TOML section key."""
+    return bool(_SERVER_ID_RE.match(server_id))
+
+
+def _sanitize_description(description: str) -> str:
+    """Strip newlines and TOML-significant characters from a description.
+
+    The description lands in a comment line (``# …``) in the rendered
+    TOML block; a stray ``]`` or newline can break the parser on the
+    next read. Keep ASCII printable + space.
+    """
+    cleaned = "".join(
+        ch if (32 <= ord(ch) < 127 and ch not in ("\r", "\n")) else " "
+        for ch in description
+    )
+    return cleaned.strip()
+
 # Short names from docs / RESEARCH.md when the public registry has no entry yet.
 KNOWN_SERVER_ALIASES: dict[str, dict[str, Any]] = {
     "postgres": {
@@ -197,11 +222,33 @@ def find_server_entry(servers: list[dict[str, Any]], query: str) -> dict[str, An
 
 
 def _default_server_id(query: str, server: dict[str, Any]) -> str:
+    """Derive a safe TOML section id from a query and registry entry.
+
+    Prefers the known-alias exact match when present. Falls back to the
+    short name (last ``/``-segment of the registry name). The result is
+    always validated against :data:`_SERVER_ID_RE`; invalid candidates
+    collapse to a deterministic safe form.
+    """
     q = query.lower().strip()
     if q in KNOWN_SERVER_ALIASES:
-        return q
-    name = str(server.get("name") or q)
-    return name.rsplit("/", 1)[-1] or q
+        candidate = q
+    else:
+        name = str(server.get("name") or q)
+        candidate = name.rsplit("/", 1)[-1] or q
+    candidate = candidate.lower()
+    return candidate if _is_valid_server_id(candidate) else _safe_fallback(candidate)
+
+
+def _safe_fallback(raw: str) -> str:
+    """Produce a safe server id from arbitrary input.
+
+    Strips to ``[a-z0-9-]``; if the result is empty or starts with a
+    non-alphanumeric, prefixes with ``server-``. Caps at 63 chars.
+    """
+    cleaned = re.sub(r"[^a-z0-9-]+", "-", raw.lower()).strip("-")
+    if not cleaned or not cleaned[0].isalnum():
+        cleaned = f"server-{cleaned}" if cleaned else "server"
+    return cleaned[:63]
 
 
 def _package_stdio_command(pkg: dict[str, Any]) -> tuple[str, list[str]] | None:
@@ -230,7 +277,7 @@ def resolve_install(query: str, server: dict[str, Any]) -> InstallResult:
     """Build TOML + optional manual steps for one registry server dict."""
     server_id = _default_server_id(query, server)
     registry_name = str(server.get("name") or server_id)
-    description = str(server.get("description") or "").strip()
+    description = _sanitize_description(str(server.get("description") or ""))
 
     packages = server.get("packages")
     if isinstance(packages, list) and packages:

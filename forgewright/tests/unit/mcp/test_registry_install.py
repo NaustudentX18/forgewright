@@ -91,3 +91,57 @@ def test_upsert_mcp_config_creates_and_replaces(tmp_path: Path) -> None:
     text2 = path.read_text()
     assert "postgresql://localhost/db" in text2
     assert text2.count("[mcp.servers.postgres]") == 1
+
+
+def test_default_server_id_safe_against_injection() -> None:
+    """A user-supplied query with TOML-significant characters is sanitised."""
+    from forgewright.mcp.registry import _default_server_id
+
+    bad = '"; INJECTED = 1'
+    result = _default_server_id(bad, {"name": bad})
+    # Must not contain spaces, quotes, or '='.
+    assert " " not in result
+    assert '"' not in result
+    assert "=" not in result
+    # Must be a valid TOML section key.
+    import re as _re
+
+    assert _re.match(r"^[a-z0-9][a-z0-9-]{0,62}$", result)
+
+
+def test_default_server_id_handles_empty_and_dash() -> None:
+    """An empty or dash-only result falls back to a safe form."""
+    from forgewright.mcp.registry import _default_server_id
+
+    # All-stripped inputs collapse to the ``server`` sentinel.
+    assert _default_server_id("!!!", {"name": ""}) == "server"
+    assert _default_server_id("---", {"name": "---"}) == "server"
+    # Input that starts with a digit is fine (matches the pattern).
+    assert _default_server_id("7zip", {"name": "7zip"}) == "7zip"
+
+
+def test_resolve_install_sanitises_description() -> None:
+    """Newlines in a description must not break out of the comment line."""
+    import tomllib
+
+    server = {
+        "name": "io.example/evil",
+        "description": "evil\n[mcp.servers.pwned]\ncommand = \"x\"",
+        "packages": [
+            {
+                "registryType": "npm",
+                "identifier": "@example/evil",
+                "transport": {"type": "stdio"},
+            }
+        ],
+    }
+    result = resolve_install("evil", server)
+    # No raw newlines survived into the rendered TOML block, so a
+    # downstream ``tomllib.loads`` succeeds and only the legitimate
+    # ``[mcp.servers.evil]`` table is present (no ``pwned`` table).
+    assert "\n[mcp.servers.pwned]" not in result.toml_section
+    parsed = tomllib.loads(result.toml_section)
+    assert "mcp" in parsed
+    assert "servers" in parsed["mcp"]
+    assert "evil" in parsed["mcp"]["servers"]
+    assert "pwned" not in parsed["mcp"]["servers"]

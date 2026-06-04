@@ -5,6 +5,11 @@ Expressions are a conjunction of ``field=value`` clauses joined by ``AND``
 
     tool=bash AND approved=false
 
+Values may be bare (``bash``) or double-quoted (``"foo AND bar"``) so
+that whitespace and the literal substring `` AND `` can appear inside
+a value. Inside a quoted value, ``\\`` and ``\\"`` are escape sequences.
+The ``AND`` keyword is only recognised outside of quotes.
+
 Values ``true``, ``false``, and ``null`` are coerced to Python literals.
 The ``tool`` field is compared case-insensitively. Nested fields use dot
 notation (``user_consent.mode=approve-each``). The alias ``approved``
@@ -13,39 +18,107 @@ reads ``user_consent.approved`` when not set at the top level.
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 __all__ = ["event_matches_query", "filter_events", "parse_audit_query"]
 
-_AND_SPLIT = re.compile(r"\s+AND\s+", re.IGNORECASE)
+
+def _skip_ws(text: str, pos: int) -> int:
+    n = len(text)
+    while pos < n and text[pos].isspace():
+        pos += 1
+    return pos
+
+
+def _parse_bare_value(text: str, pos: int) -> tuple[str, int]:
+    """Read a bare (unquoted) value starting at ``pos``.
+
+    Returns ``(value, new_pos)``. The value runs to the next whitespace
+    or end-of-input. Empty values are not returned — the caller
+    distinguishes empty from missing.
+    """
+    n = len(text)
+    start = pos
+    while pos < n and not text[pos].isspace():
+        pos += 1
+    return text[start:pos], pos
+
+
+def _parse_quoted_value(text: str, pos: int) -> tuple[str, int]:
+    """Read a ``"…"`` value starting just after the opening quote.
+
+    Returns ``(value, new_pos)`` where ``new_pos`` is positioned just
+    after the closing quote. ``\\`` and ``\\"`` are recognised as
+    escapes inside the string.
+    """
+    chars: list[str] = []
+    n = len(text)
+    while pos < n:
+        ch = text[pos]
+        if ch == "\\" and pos + 1 < n:
+            chars.append(text[pos + 1])
+            pos += 2
+            continue
+        if ch == '"':
+            return "".join(chars), pos + 1
+        chars.append(ch)
+        pos += 1
+    raise ValueError("unterminated quoted value")
 
 
 def parse_audit_query(expr: str) -> list[tuple[str, str]]:
     """Parse a query string into ``(field, value)`` clauses.
 
     Raises:
-        ValueError: On empty input or malformed clauses.
+        ValueError: On empty input, missing ``=``, missing value, an
+            unterminated quoted value, or an ``AND`` that does not
+            separate two clauses.
     """
     text = expr.strip()
     if not text:
         raise ValueError("empty query expression")
 
     clauses: list[tuple[str, str]] = []
-    for raw in _AND_SPLIT.split(text):
-        part = raw.strip()
-        if not part:
-            raise ValueError("empty clause between AND operators")
-        if "=" not in part:
-            raise ValueError(f"expected field=value, got {part!r}")
-        field, _, value = part.partition("=")
-        field = field.strip()
-        value = value.strip()
+    pos = _skip_ws(text, 0)
+    n = len(text)
+    expect_clause = True
+    while pos < n:
+        if not expect_clause:
+            # We are between clauses: only ``AND`` is allowed here.
+            rest = text[pos:]
+            head = rest[:3]
+            if not head or head[:3].upper() != "AND" or (len(rest) > 3 and not rest[3].isspace()):
+                raise ValueError(f"expected AND between clauses, got {rest!r}")
+            pos = _skip_ws(text, pos + 3)
+            if pos >= n:
+                raise ValueError("trailing AND with no clause")
+            expect_clause = True
+            continue
+
+        # Parse one ``field=value``.
+        eq = text.find("=", pos)
+        if eq == -1:
+            raise ValueError(f"expected field=value, got {text[pos:]!r}")
+        field = text[pos:eq].strip()
         if not field:
-            raise ValueError(f"missing field name in clause {part!r}")
+            raise ValueError(f"missing field name in clause {text[pos:]!r}")
+        pos = _skip_ws(text, eq + 1)
+        if pos >= n:
+            raise ValueError(f"missing value in clause for field {field!r}")
+        if text[pos] == '"':
+            value, pos = _parse_quoted_value(text, pos + 1)
+        else:
+            value, pos = _parse_bare_value(text, pos)
         if not value:
-            raise ValueError(f"missing value in clause {part!r}")
+            raise ValueError(f"missing value in clause for field {field!r}")
         clauses.append((field, value))
+        pos = _skip_ws(text, pos)
+        expect_clause = False
+
+    if expect_clause is False and not clauses:
+        # No clauses parsed at all (e.g. expression was just whitespace,
+        # which the leading ``strip`` already handles, but be explicit).
+        raise ValueError("empty query expression")
     return clauses
 
 
