@@ -44,20 +44,110 @@ def test_mcp_serve_shortcut_help() -> None:
     assert "--transport" in out
 
 
+# ---------- registry install (v0.2) ----------
+
+
+def test_mcp_install_requires_server_name() -> None:
+    """``forgewright mcp install`` without a name exits 2."""
+    result = runner.invoke(app, ["mcp", "install"])
+    assert result.exit_code == 2
+    out = (result.stdout or "") + (getattr(result, "stderr", None) or "")
+    assert "install" in out.lower()
+
+
+def test_mcp_install_unknown_server_exits_1() -> None:
+    """Unknown server name exits 1 when the registry has no match."""
+    import httpx
+    import respx
+    from forgewright.mcp.registry import REGISTRY_URL
+
+    with respx.mock:
+        respx.get(REGISTRY_URL).mock(
+            return_value=httpx.Response(200, json={"servers": [], "metadata": {}})
+        )
+        result = runner.invoke(app, ["mcp", "install", "no-such-server-xyz"])
+    assert result.exit_code == 1
+    out = (result.stdout or "") + (getattr(result, "stderr", None) or "")
+    assert "no-such-server-xyz" in out
+
+
+def test_mcp_install_postgres_writes_config(tmp_path, monkeypatch) -> None:
+    """``forgewright mcp install postgres`` writes stdio npx config via alias."""
+    import httpx
+    import respx
+    from forgewright.mcp.registry import REGISTRY_URL
+
+    config_path = tmp_path / "mcp.json"
+    monkeypatch.setattr(
+        "forgewright.mcp.registry.MCP_CONFIG_PATH",
+        config_path,
+    )
+
+    with respx.mock:
+        respx.get(REGISTRY_URL).mock(
+            return_value=httpx.Response(200, json={"servers": [], "metadata": {}})
+        )
+        result = runner.invoke(app, ["mcp", "install", "postgres"])
+
+    assert result.exit_code == 0
+    out = (result.stdout or "") + (getattr(result, "stderr", None) or "")
+    assert "mcp.servers.postgres" in out
+    assert "server-postgres" in out
+    assert config_path.exists()
+    written = config_path.read_text()
+    assert "[mcp.servers.postgres]" in written
+    assert "npx" in written
+
+
+def test_mcp_install_from_registry_mock(tmp_path, monkeypatch) -> None:
+    """Install resolves a nested registry entry over HTTP (respx)."""
+    import httpx
+    import respx
+    from forgewright.mcp.registry import REGISTRY_URL
+
+    config_path = tmp_path / "mcp.json"
+    monkeypatch.setattr(
+        "forgewright.mcp.registry.MCP_CONFIG_PATH",
+        config_path,
+    )
+    payload = {
+        "servers": [
+            {
+                "server": {
+                    "name": "ai.adeu/adeu",
+                    "packages": [
+                        {
+                            "registryType": "npm",
+                            "identifier": "@adeu/mcp-server",
+                            "version": "1.7.1",
+                            "transport": {"type": "stdio"},
+                        }
+                    ],
+                },
+                "_meta": {
+                    "io.modelcontextprotocol.registry/official": {"isLatest": True},
+                },
+            }
+        ],
+        "metadata": {},
+    }
+
+    with respx.mock:
+        respx.get(REGISTRY_URL).mock(return_value=httpx.Response(200, json=payload))
+        result = runner.invoke(app, ["mcp", "install", "adeu"])
+
+    assert result.exit_code == 0
+    out = (result.stdout or "") + (getattr(result, "stderr", None) or "")
+    assert "@adeu/mcp-server@1.7.1" in out
+    assert "[mcp.servers.adeu]" in config_path.read_text()
+
+
 # ---------- stub-mode subcommands ----------
 
 
 def test_mcp_ls_prints_v02_stub_message() -> None:
     """``forgewright mcp ls`` prints the v0.2 stub message and exits 0."""
     result = runner.invoke(app, ["mcp", "ls"])
-    assert result.exit_code == 0
-    out = (result.stdout or "") + (getattr(result, "stderr", None) or "")
-    assert "v0.2" in out
-
-
-def test_mcp_install_prints_v02_stub_message() -> None:
-    """``forgewright mcp install`` is also a v0.2 stub."""
-    result = runner.invoke(app, ["mcp", "install"])
     assert result.exit_code == 0
     out = (result.stdout or "") + (getattr(result, "stderr", None) or "")
     assert "v0.2" in out
