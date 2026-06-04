@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from forgewright.schema import ToolResult
-from forgewright.tool.browser import BrowserUseTool
+from forgewright.tool.browser import BrowserUseTool, _render_snapshot
 
 # -- Module-level fixtures -------------------------------------------------
 
@@ -40,11 +40,9 @@ def _inject_mock_page(tool: BrowserUseTool) -> tuple[AsyncMock, AsyncMock, Async
     browser = AsyncMock(name="browser")
     context = AsyncMock(name="context")
 
-    # `page.accessibility.snapshot()` is a synchronous proxy; the AsyncMock
-    # auto-handles both sync and async attribute lookups, so this is fine.
-    accessibility = MagicMock(name="accessibility")
-    accessibility.snapshot = AsyncMock(return_value={})
-    page.accessibility = accessibility
+    page.aria_snapshot = AsyncMock(
+        return_value='- heading "Example Domain" [level=1] [ref=e1]'
+    )
 
     # page.goto returns a response-like object with a `.status` attribute.
     response = MagicMock(name="response")
@@ -264,55 +262,82 @@ async def test_screenshot_full_page_propagates() -> None:
 
 
 @pytest.mark.asyncio
-async def test_extract_renders_snapshot_as_text() -> None:
+async def test_extract_uses_aria_snapshot() -> None:
     tool = _make_tool()
     page, _, _ = _inject_mock_page(tool)
-    page.accessibility.snapshot = AsyncMock(
-        return_value={
-            "name": "root",
-            "role": "WebArea",
-            "children": [
-                {
-                    "name": "Example Domain",
-                    "role": "heading",
-                    "value": "",
-                    "children": [],
-                },
-                {
-                    "name": "Learn more",
-                    "role": "link",
-                    "value": "",
-                    "children": [],
-                },
-            ],
-        }
+    page.aria_snapshot = AsyncMock(
+        return_value=(
+            '- generic [ref=e2]:\n'
+            '  - heading "Example Domain" [level=1] [ref=e3]\n'
+            '  - link "Learn more" [ref=e6]'
+        )
     )
 
     result = await tool(action="extract")
     assert result.is_error is False
     text = result.output or ""
-    assert "root: WebArea" in text
-    assert "Example Domain: heading" in text
-    assert "Learn more: link" in text
-    # Children are indented one level deeper than the root.
-    assert "  Example Domain: heading" in text
+    assert 'heading "Example Domain"' in text
+    assert 'link "Learn more"' in text
+    page.aria_snapshot.assert_awaited_once_with(mode="ai")
+    page.evaluate.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_extract_truncates_oversized_snapshot() -> None:
     tool = _make_tool()
     page, _, _ = _inject_mock_page(tool)
-    # Build a snapshot that, when rendered, is well past the 50k cap.
-    big = "x" * 60_000
-    page.accessibility.snapshot = AsyncMock(
-        return_value={"name": big, "role": "text", "children": []}
-    )
+    page.aria_snapshot = AsyncMock(return_value="x" * 60_000)
 
     result = await tool(action="extract")
     assert result.is_error is False
     text = result.output or ""
     assert "[truncated]" in text
     assert len(text) < 60_000
+
+
+@pytest.mark.asyncio
+async def test_extract_legacy_accessibility_snapshot() -> None:
+    """Older Playwright: JSON tree via accessibility.snapshot()."""
+
+    class _LegacyPage:
+        def __init__(self) -> None:
+            accessibility = MagicMock(name="accessibility")
+            accessibility.snapshot = MagicMock(
+                return_value={
+                    "name": "root",
+                    "role": "WebArea",
+                    "children": [
+                        {"name": "Example Domain", "role": "heading", "children": []}
+                    ],
+                }
+            )
+            self.accessibility = accessibility
+
+    tool = _make_tool()
+    page = _LegacyPage()
+    tool._page = page  # type: ignore[assignment]
+    tool._browser = MagicMock(name="browser")
+    tool._context = MagicMock(name="context")
+    tool._playwright = MagicMock(name="playwright")
+
+    result = await tool(action="extract")
+    assert result.is_error is False
+    text = result.output or ""
+    assert "root: WebArea" in text
+    assert "  Example Domain: heading" in text
+    page.accessibility.snapshot.assert_called_once()
+
+
+def test_render_snapshot_formats_tree() -> None:
+    text = _render_snapshot(
+        {
+            "name": "root",
+            "role": "WebArea",
+            "children": [{"name": "Learn more", "role": "link", "children": []}],
+        }
+    )
+    assert "root: WebArea" in text
+    assert "  Learn more: link" in text
 
 
 @pytest.mark.asyncio

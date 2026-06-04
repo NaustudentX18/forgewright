@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from forgewright.config import LLMConfig
-from forgewright.llm import LLMBackend, LiteLLMBackend, StubBackend
+from forgewright.llm import LiteLLMBackend, LLMBackend, StubBackend
 from forgewright.schema import AssistantTurn, ChatMessage, ToolCall, ToolSpec
 
 
@@ -64,7 +64,7 @@ class TestFromConfig:
 
 class TestModelString:
     @pytest.mark.parametrize(
-        "provider,model,expected",
+        ("provider", "model", "expected"),
         [
             ("anthropic", "claude-sonnet-4-6", "anthropic/claude-sonnet-4-6"),
             ("openai", "gpt-5", "openai/gpt-5"),

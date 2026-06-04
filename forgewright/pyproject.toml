@@ -63,8 +63,11 @@ web = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.27",
 ]
+tui = [
+  "textual>=0.47",
+]
 all = [
-  "forgewright[llm,mcp,browser,sandbox,crawl,viz,web]",
+  "forgewright[llm,mcp,browser,sandbox,crawl,viz,web,tui]",
 ]
 dev = [
   "pytest>=8",
@@ -167,6 +170,8 @@ module = [
   "starlette.*",
   "litellm",
   "litellm.*",
+  "textual",
+  "textual.*",
 ]
 ignore_missing_imports = true
 

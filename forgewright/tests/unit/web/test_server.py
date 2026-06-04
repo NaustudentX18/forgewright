@@ -295,7 +295,6 @@ def test_app_js_toggles_stop_button_with_sending_state(client: TestClient) -> No
     assert 'setAttribute("hidden", "")' in js
     # The pairing must be consistent — find the two paired blocks
     # and assert that sendBtn and stopBtn are both touched in each.
-    import re
     # Quick sanity: stopBtn is referenced at least 4 times
     # (1 in send-show, 1 in send-hide, 1 in finish-hide, 1 in finish-show,
     #  plus click handler).
@@ -427,7 +426,8 @@ def test_manifest_has_pwa_install_fields(client: TestClient) -> None:
     body = client.get("/static/manifest.webmanifest").json()
     assert body["id"] == "/"
     assert body["scope"] == "/"
-    assert isinstance(body["description"], str) and body["description"]
+    assert isinstance(body["description"], str)
+    assert body["description"]
     assert "developer" in body["categories"]
     icons = body["icons"]
     # The maskable icon MUST be present for adaptive launchers.
@@ -443,7 +443,8 @@ def test_manifest_has_install_screenshots(client: TestClient) -> None:
     shots = body.get("screenshots") or []
     assert len(shots) >= 2
     forms = {s.get("form_factor") for s in shots}
-    assert "wide" in forms and "narrow" in forms
+    assert "wide" in forms
+    assert "narrow" in forms
     for sc in shots:
         r = client.get(sc["src"])
         assert r.status_code == 200
@@ -457,7 +458,8 @@ def test_manifest_has_share_target(client: TestClient) -> None:
     assert st.get("action") == "/share-in"
     assert st.get("method") == "POST"
     files = (st.get("params") or {}).get("files") or []
-    assert files and files[0].get("name") == "media"
+    assert files
+    assert files[0].get("name") == "media"
 
 
 def test_share_in_get_redirects_to_composer(client: TestClient) -> None:
@@ -551,7 +553,7 @@ def test_index_links_mask_icon_for_safari(client: TestClient) -> None:
 
 
 def test_index_links_apple_touch_icon_180(client: TestClient) -> None:
-    """iOS Home Screen icon is the dedicated 180×180 PNG, not the
+    """iOS Home Screen icon is the dedicated 180x180 PNG, not the
     generic 192 fallback we used pre-PWA."""
     html = client.get("/").text
     assert 'rel="apple-touch-icon"' in html
@@ -560,11 +562,11 @@ def test_index_links_apple_touch_icon_180(client: TestClient) -> None:
 
 def test_manifest_icon_maskable_is_512_png(client: TestClient) -> None:
     """The maskable icon file referenced from the manifest actually
-    exists and is a 512×512 PNG."""
+    exists and is a 512x512 PNG."""
     r = client.get("/static/icon-maskable-512.png")
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/png"
-    # Cheap check: the PNG header for a 512×512 IHDR has '00 00 02 00'
+    # Cheap check: the PNG header for a 512x512 IHDR has '00 00 02 00'
     # for width and height (little-endian). Magic bytes are 89 50 4E 47.
     body = r.content
     assert body[:8] == b"\x89PNG\r\n\x1a\n"
@@ -572,4 +574,5 @@ def test_manifest_icon_maskable_is_512_png(client: TestClient) -> None:
     # Width is bytes 16..20, height is bytes 20..24.
     import struct
     w, h = struct.unpack(">II", body[16:24])
-    assert w == 512 and h == 512, f"maskable icon is {w}x{h}, expected 512x512"
+    assert w == 512
+    assert h == 512

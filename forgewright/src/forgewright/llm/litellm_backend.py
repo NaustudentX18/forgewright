@@ -183,7 +183,7 @@ class LiteLLMBackend(LLMBackend):
     async def ask(
         self,
         messages: list[ChatMessage],
-        **kw: Any,  # noqa: ARG002 - reserved for future per-call overrides
+        **kw: Any,  # reserved for future per-call overrides
     ) -> ChatMessage:
         """Plain completion, no tools. Returns just the assistant content."""
         params = self._completion_params(stream=False)
@@ -196,7 +196,7 @@ class LiteLLMBackend(LLMBackend):
         self,
         messages: list[ChatMessage],
         tools: list[ToolSpec] | list[dict[str, Any]],
-        **kw: Any,  # noqa: ARG002 - reserved for future per-call overrides
+        **kw: Any,  # reserved for future per-call overrides
     ) -> AssistantTurn:
         """Function-calling completion. The core Manus-style path."""
         params = self._completion_params(stream=False)
@@ -210,7 +210,7 @@ class LiteLLMBackend(LLMBackend):
     async def stream(
         self,
         messages: list[ChatMessage],
-        **kw: Any,  # noqa: ARG002 - reserved for future per-call overrides
+        **kw: Any,  # reserved for future per-call overrides
     ) -> AsyncIterator[str]:
         """Async token stream. Yields plain strings (no events)."""
         params = self._completion_params(stream=True)
@@ -224,6 +224,19 @@ class LiteLLMBackend(LLMBackend):
             piece = getattr(delta, "content", None)
             if piece:
                 yield piece
+
+    def count_tokens(self, messages: list[ChatMessage]) -> int:
+        """Provider-aware counting: tiktoken (OpenAI/Azure), Anthropic API,
+        characters÷4 for everyone else."""
+        from forgewright.llm.token_count import count_for_provider
+
+        return count_for_provider(
+            self._config.provider,
+            self._config.model,
+            messages,
+            api_key=self._config.api_key,
+            base_url=self._config.base_url,
+        )
 
     def max_context_tokens(self) -> int:
         """Per-provider default. LiteLLM also exposes per-model lookups

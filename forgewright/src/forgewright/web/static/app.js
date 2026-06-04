@@ -1,6 +1,4 @@
 (function () {
-  "use strict";
-
   var sidebar = document.getElementById("sidebar");
   var scrim = document.getElementById("scrim");
   var openBtn = document.getElementById("openSidebar");
@@ -25,7 +23,6 @@
   var stopBtn = document.getElementById("stop");
   var toast = document.getElementById("toast");
   var toastMsg = toast ? toast.querySelector(".toast-msg") : null;
-
   var state = {
     sessionId: null,
     sessions: [],
@@ -35,11 +32,9 @@
     placeholderIdx: 0,
     placeholderTimer: null
   };
-
   var QUEUE_DB = "forgewright-offline-v1";
   var QUEUE_STORE = "outbox";
   var SYNC_TAG = "fw-flush-queue";
-
   function escapeHtml(s) {
     return String(s || "")
       .replace(/&/g, "&amp;")
@@ -47,7 +42,6 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
   }
-
   function renderMd(src) {
     var PLACEHOLDER = "\uE000FW\uE001";
     var fences = [];
@@ -699,8 +693,6 @@
       else composer.dispatchEvent(new Event("submit", { cancelable: true }));
     });
   });
-
-  // --- Offline outbox (IndexedDB + Background Sync) -------------------
   function openQueueDb() {
     return new Promise(function (resolve, reject) {
       var req = indexedDB.open(QUEUE_DB, 1);
@@ -711,7 +703,6 @@
       req.onerror = function () { reject(req.error); };
     });
   }
-
   function updateQueueBadge() {
     if (!queueBadge) return;
     return openQueueDb().then(function (db) {
@@ -732,14 +723,12 @@
       });
     }).catch(function () { return 0; });
   }
-
   function registerBackgroundSync() {
     if (!("serviceWorker" in navigator) || !("SyncManager" in window)) return;
     navigator.serviceWorker.ready.then(function (reg) {
       return reg.sync.register(SYNC_TAG);
     }).catch(function () {});
   }
-
   function enqueueOffline(content) {
     return openQueueDb().then(function (db) {
       return new Promise(function (resolve, reject) {
@@ -754,7 +743,6 @@
       });
     });
   }
-
   function sendQueuedItem(item) {
     var text = item.content;
     var placeholder = addMessage("assistant", "");
@@ -785,7 +773,6 @@
       throw err;
     }).then(finish);
   }
-
   function flushQueue() {
     if (!navigator.onLine || state.sending) return Promise.resolve();
     return openQueueDb().then(function (db) {
@@ -815,7 +802,6 @@
       });
     }).catch(function () {});
   }
-
   window.addEventListener("online", function () {
     setConnection("online", "Online");
     flushQueue();
@@ -823,22 +809,18 @@
   window.addEventListener("offline", function () {
     setConnection("reconnecting", "Offline");
   });
-
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.addEventListener("message", function (ev) {
       if (ev.data && ev.data.type === SYNC_TAG) flushQueue();
     });
   }
-
-  // --- Web Share Target (URL / text / title -> composer) --------------
   function formatSharePayload(params) {
-    var parts = ["[Shared to forgewright — treat as AskHuman context]"];
+    var parts = ["[Shared — AskHuman context]"];
     if (params.title) parts.push("Title: " + params.title);
     if (params.url) parts.push("URL: " + params.url);
     if (params.text) parts.push("Text: " + params.text);
     return parts.join("\n");
   }
-
   function consumeShareParams() {
     var qs = new URLSearchParams(window.location.search);
     var title = qs.get("title") || "";
@@ -861,38 +843,23 @@
       window.history.replaceState({}, "", window.location.pathname);
     }
   }
-
   loadSessions();
   showEmpty();
   consumeShareParams();
   updateQueueBadge();
-
-  // Stop / cancel — POST to the abort endpoint when the user clicks
-  // the red button during an in-flight run. The server emits
-  // `event: error` with `{"message": "aborted"}` which the existing
-  // SSE consumer handles; we just need to wire the click.
   if (stopBtn) {
     stopBtn.addEventListener("click", function () {
       if (!state.sending || !state.sessionId) return;
       var sid = state.sessionId;
-      // Fire-and-forget; the server's 204 is the ack we care about.
-      // The streaming consumer will see the error event and tear down.
       postJson("/api/sessions/" + sid + "/abort", {}).catch(function (err) {
         console.warn("abort.post.failed", err);
       });
-      // Optimistically flip UI so the user gets instant feedback even
-      // before the server's error event round-trips.
       state.sending = false;
       sendBtn.removeAttribute("hidden");
       stopBtn.setAttribute("hidden", "");
       sendBtn.disabled = false;
     });
   }
-
-  // --- PWA: service worker registration + install prompt ----------------
-  // Keeps a home-screen install path alive on Android (beforeinstallprompt)
-  // and shows an iOS Share-sheet hint, since iOS does not fire the event.
-  // No-op on desktop browsers and when the app is already installed.
   (function pwaInstall() {
     var DISMISS_KEY = "fw-install-dismissed-v1";
     if (localStorage.getItem(DISMISS_KEY)) return;
@@ -932,8 +899,6 @@
       show('Tap Share, then "Add to Home Screen".', function () {});
     }
   })();
-
-  // Service worker — register on the same origin as the app, scope "/".
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", function () {
       navigator.serviceWorker

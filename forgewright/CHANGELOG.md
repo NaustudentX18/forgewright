@@ -25,7 +25,20 @@ project adheres to [CalVer](https://calver.org/) (`YYYY.MM.PATCH`).
   `static/screenshots/{desktop,mobile}.png` referenced from the manifest.
 - Service worker cache bumped to `forgewright-shell-v2`.
 
+### Added (v0.2 swarm)
+- **`forgewright audit query`** — filter JSONL audit log with `field=value`
+  and `AND` (e.g. `tool=bash AND approved=false`).
+- **MCP registry install** — `forgewright mcp install <name>` writes server
+  blocks to `~/.config/forgewright/mcp.json`.
+- **Provider-aware token counting** — `llm/token_count.py` for context
+  budgeting (Anthropic API, tiktoken on OpenAI, heuristic elsewhere).
+- **Browser extract** — `aria_snapshot(mode="ai")` instead of scraping
+  `innerText` on modern Playwright.
+
 ### Changed
+- Static payload **optimized ~67 KB → ~61 KB** (dedupe inline CSS, trim
+  `app.js`); budget remains 68 KB.
+- **Ruff-clean** tree for the touched modules.
 - Static payload budget **60 KB → 68 KB** (offline queue + restored
   `app.js`).
 

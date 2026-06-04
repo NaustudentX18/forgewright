@@ -17,8 +17,8 @@ from forgewright.logger import logger
 from forgewright.security.trust import toml_quote
 
 __all__ = [
-    "REGISTRY_URL",
     "MCP_CONFIG_PATH",
+    "REGISTRY_URL",
     "InstallResult",
     "find_server_entry",
     "format_mcp_server_toml",
@@ -168,7 +168,7 @@ def _name_matches(server: dict[str, Any], query: str) -> bool:
     title = str(server.get("title") or "").lower()
     if not name and not title:
         return False
-    if q == name or q == title:
+    if q in (name, title):
         return True
     if name.endswith(f"/{q}") or name.endswith(f".{q}"):
         return True
@@ -356,7 +356,6 @@ def format_mcp_server_toml(
 def upsert_mcp_config(path: Path, server_id: str, section: str) -> None:
     """Create or replace one server block in the MCP config file."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    header = f"[mcp.servers.{server_id}]"
     if not path.exists():
         path.write_text(
             "# MCP servers — installed via `forgewright mcp install`\n\n" + section.strip() + "\n",
