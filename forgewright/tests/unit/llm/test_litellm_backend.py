@@ -246,6 +246,64 @@ class TestCompletionParams:
         b2 = LiteLLMBackend(cfg2)
         assert b2._completion_params()["api_key"] == "sk-xyz"
 
+    def test_drop_params_is_per_call(self) -> None:
+        """H0.8f: drop_params is no longer a module-level litellm global —
+        it is a per-call kwarg sourced from LLMConfig."""
+        cfg_on = _cfg("anthropic", model="m", drop_params=True)
+        cfg_off = _cfg("anthropic", model="m", drop_params=False)
+        assert LiteLLMBackend(cfg_on)._completion_params()["drop_params"] is True
+        assert LiteLLMBackend(cfg_off)._completion_params()["drop_params"] is False
+
+
+# --------------------------------------------------------------------------- #
+# Context-window lookup (H0.8a)
+# --------------------------------------------------------------------------- #
+
+
+class TestMaxContextTokens:
+    def test_uses_litellm_get_max_tokens_first(self) -> None:
+        """H0.8a: per-call litellm.get_max_tokens() wins over the
+        DEFAULT_CONTEXT_TOKENS map and the Settings fallback."""
+        cfg = _cfg("anthropic", model="claude-sonnet-4-6")
+        b = LiteLLMBackend(cfg)
+        with patch(
+            "forgewright.llm.litellm_backend.litellm.get_max_tokens",
+            return_value=42_000,
+        ) as m:
+            assert b.max_context_tokens() == 42_000
+        m.assert_called_once()
+
+    def test_falls_back_to_provider_map(self) -> None:
+        """If litellm.get_max_tokens raises, the provider default map is
+        used (so the legacy DEFAULT_CONTEXT_TOKENS still works)."""
+        cfg = _cfg("anthropic", model="m")
+        b = LiteLLMBackend(cfg)
+        with patch(
+            "forgewright.llm.litellm_backend.litellm.get_max_tokens",
+            side_effect=RuntimeError("unknown model"),
+        ):
+            assert b.max_context_tokens() == 200_000
+
+    def test_falls_back_to_settings_context_tokens_default(self) -> None:
+        """The final fallback is Settings.llm.context_tokens_default."""
+        from forgewright.config import Settings, get_settings
+
+        get_settings.cache_clear()  # type: ignore[attr-defined]
+        custom = Settings(llm=LLMConfig(context_tokens_default=99_000))  # type: ignore[arg-type]
+        with (
+            patch("forgewright.config.get_settings", return_value=custom),
+            patch(
+                "forgewright.llm.litellm_backend.litellm.get_max_tokens",
+                return_value=None,
+            ),
+        ):
+            # The 'stub' provider isn't in DEFAULT_CONTEXT_TOKENS, so the
+            # Settings default should win.
+            cfg = _cfg("stub", model="m")
+            b = LiteLLMBackend(cfg)
+            assert b.max_context_tokens() == 99_000
+        get_settings.cache_clear()  # type: ignore[attr-defined]
+
 
 # --------------------------------------------------------------------------- #
 # End-to-end against mocked litellm
@@ -305,3 +363,64 @@ class TestSupportsToolCalling:
         cfg = LLMConfig(provider=provider, model="m")  # type: ignore[arg-type]
         b = LiteLLMBackend(cfg)
         assert b.supports_tool_calling() is True
+
+
+# --------------------------------------------------------------------------- #
+# Side-effect flag pinning (H3.5)
+#
+# `litellm.suppress_debug_info` and `litellm.drop_params` are set on
+# import. drop_params is per-call configurable since H0.8f. We pin the
+# on-import values here so a future refactor cannot silently disable
+# them — both are load-bearing for production behaviour:
+# - suppress_debug_info stops litellm from writing its own logs to
+#   stdout, which would interleave with our loguru output.
+# - drop_params is a safety net so a new provider without a feature
+#   we use does not raise a 400 mid-loop.
+# --------------------------------------------------------------------------- #
+
+
+class TestLitellmSideEffectFlags:
+    def test_suppress_debug_info_is_true_on_import(self) -> None:
+        import litellm
+
+        assert litellm.suppress_debug_info is True
+
+    def test_drop_params_module_default_still_true(self) -> None:
+        """The per-call ``drop_params`` default is True (H0.8f).
+
+        H0.8f moved ``drop_params`` off the module-level side effect
+        and into a per-call kwarg sourced from ``LLMConfig.drop_params``.
+        The default must stay True (silently dropping params is the
+        safety net for unknown provider features).
+        """
+        cfg = LLMConfig(provider="openai", model="gpt-4o-mini")
+        b = LiteLLMBackend(cfg)
+        assert b._config.drop_params is True
+
+    @pytest.mark.asyncio
+    async def test_completion_params_does_not_override_drop_params(self) -> None:
+        """``_completion_params`` always emits ``drop_params=True`` unless
+        the caller explicitly disables it (H0.8f)."""
+        cfg = LLMConfig(provider="openai", model="gpt-4o-mini")
+        b = LiteLLMBackend(cfg)
+        with patch(
+            "forgewright.llm.litellm_backend.litellm.acompletion",
+            new=AsyncMock(return_value=_mock_response("ok")),
+        ) as m:
+            await b.ask([ChatMessage(role="user", content="hi")])
+        kwargs = m.call_args.kwargs
+        assert kwargs.get("drop_params") is True
+
+    @pytest.mark.asyncio
+    async def test_drop_params_is_per_call_configurable(self) -> None:
+        """H0.8f adds a per-call ``drop_params`` override on LLMConfig.
+        This test guards that the override actually flows through to
+        the litellm call (a future refactor must not silently drop it)."""
+        cfg = LLMConfig(provider="openai", model="gpt-4o-mini", drop_params=False)
+        b = LiteLLMBackend(cfg)
+        with patch(
+            "forgewright.llm.litellm_backend.litellm.acompletion",
+            new=AsyncMock(return_value=_mock_response("ok")),
+        ) as m:
+            await b.ask([ChatMessage(role="user", content="hi")])
+        assert m.call_args.kwargs.get("drop_params") is False
