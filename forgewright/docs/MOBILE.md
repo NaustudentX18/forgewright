@@ -91,9 +91,11 @@ The service worker caches:
 
 What this means in practice: if you lose Wi-Fi, the app still
 opens and you can still scroll through your most recent
-conversation. **Sending new messages requires connectivity** —
-SSE is not cached and there's no offline message-send queue
-(yet; that's a follow-up).
+conversation. **New messages you send while offline are queued**
+in IndexedDB on the device. A **Queued: N** badge appears in
+the top bar. When connectivity returns (or Background Sync
+fires on Chromium), the outbox flushes automatically and the
+agent runs as usual over SSE.
 
 ## Reproducing the install
 
@@ -106,9 +108,34 @@ If the install prompt or icon doesn't appear right away:
    remove the entry for `aiserver.<tailnet>.ts.net`.
 3. Reload.
 
-The SW's cache name is `forgewright-shell-v1`; bumping it (in
+The SW's cache name is `forgewright-shell-v2`; bumping it (in
 `src/forgewright/web/static/sw.js`) invalidates the old shell
 on next activate without any user action.
+
+## Sharing to forgewright from another app
+
+The manifest declares a **share target**. On Android (and other
+Chromium browsers that support file share), choose **Share →
+forgewright**. URLs, text, and photos arrive as a pre-filled
+composer message tagged for **AskHuman** context — review and
+tap Send.
+
+On iOS, link/text shares that use the GET form still land on
+`/share-in` and redirect into the app. Photo shares use the POST
+handler (service worker or server) and include attachment metadata
+in the prefill.
+
+## Install card screenshots
+
+Regenerate manifest screenshots after UI changes:
+
+```bash
+uv run --extra web forgewright web --port 8787 &
+uv run --extra browser python tools/regen_pwa_screenshots.py
+```
+
+Use `--placeholder-only` for quick placeholder PNGs without a
+running server.
 
 ## Troubleshooting
 

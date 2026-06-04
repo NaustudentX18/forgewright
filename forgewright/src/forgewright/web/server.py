@@ -44,9 +44,10 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -393,6 +394,56 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not index.exists():
             raise HTTPException(status_code=404, detail="UI not built")
         return FileResponse(str(index))
+
+    def _share_redirect(
+        *,
+        title: str = "",
+        text: str = "",
+        url: str = "",
+        attachment: str = "",
+    ) -> RedirectResponse:
+        """Build a composer prefill from a Web Share Target payload."""
+        parts = ["[Shared to forgewright — treat as AskHuman context]"]
+        if title:
+            parts.append(f"Title: {title}")
+        if url:
+            parts.append(f"URL: {url}")
+        if text:
+            parts.append(f"Text: {text}")
+        if attachment:
+            parts.append(attachment)
+        shared = quote("\n".join(parts), safe="")
+        return RedirectResponse(url=f"/?shared={shared}&new=1", status_code=303)
+
+    @app.get("/share-in", include_in_schema=False)
+    async def share_in_get(
+        title: str = "",
+        text: str = "",
+        url: str = "",
+    ) -> RedirectResponse:
+        """GET share target (link/text) → redirect into the chat composer."""
+        return _share_redirect(title=title, text=text, url=url)
+
+    @app.post("/share-in", include_in_schema=False)
+    async def share_in_post(request: Request) -> RedirectResponse:
+        """POST share target (optional file) → redirect into the composer."""
+        form = await request.form()
+        title = str(form.get("title") or "")
+        text = str(form.get("text") or "")
+        link = str(form.get("url") or "")
+        attachment = ""
+        media = form.get("media")
+        if media is not None and hasattr(media, "filename"):
+            filename = getattr(media, "filename", "") or "attachment"
+            size = getattr(media, "size", 0) or 0
+            content_type = getattr(media, "content_type", "") or "application/octet-stream"
+            attachment = f"Attachment: {filename} ({size} bytes, {content_type})"
+        return _share_redirect(
+            title=title,
+            text=text,
+            url=link,
+            attachment=attachment,
+        )
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:

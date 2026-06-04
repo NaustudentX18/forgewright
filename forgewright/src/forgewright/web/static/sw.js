@@ -20,7 +20,7 @@
  * Bumping CACHE_NAME invalidates the old shell on next activate.
  */
 
-const CACHE_NAME = "forgewright-shell-v1";
+const CACHE_NAME = "forgewright-shell-v2";
 const SHELL = [
   "/",
   "/static/style.css",
@@ -81,6 +81,52 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// Background Sync: nudge open clients to flush the IndexedDB outbox.
+// POST /messages still bypasses the SW — only the page sends when online.
+const SYNC_TAG = "fw-flush-queue";
+
+self.addEventListener("sync", (event) => {
+  if (event.tag !== SYNC_TAG) return;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(
+      (clients) => {
+        clients.forEach((client) => {
+          client.postMessage({ type: SYNC_TAG });
+        });
+      },
+    ),
+  );
+});
+
+async function handleShareIn(req) {
+  try {
+    const form = await req.formData();
+    const title = form.get("title") || "";
+    const text = form.get("text") || "";
+    const link = form.get("url") || "";
+    const parts = ["[Shared to forgewright — treat as AskHuman context]"];
+    if (title) parts.push("Title: " + title);
+    if (link) parts.push("URL: " + link);
+    if (text) parts.push("Text: " + text);
+    const media = form.get("media");
+    if (media && typeof media.name === "string") {
+      parts.push(
+        "Attachment: " +
+          media.name +
+          " (" +
+          (media.size || 0) +
+          " bytes, " +
+          (media.type || "application/octet-stream") +
+          ")",
+      );
+    }
+    const shared = encodeURIComponent(parts.join("\n"));
+    return Response.redirect("/?shared=" + shared + "&new=1", 303);
+  } catch (err) {
+    return new Response("share failed", { status: 400 });
+  }
+}
+
 function isStaticAsset(url) {
   return url.pathname.startsWith("/static/");
 }
@@ -97,12 +143,19 @@ function isSessionGet(url) {
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+
+  // Web Share Target (POST with optional files) — not the chat SSE path.
+  if (req.method === "POST" && url.pathname === "/share-in") {
+    event.respondWith(handleShareIn(req));
+    return;
+  }
+
   if (req.method !== "GET") {
     // POST/PUT/DELETE bypass — preserves SSE streaming for message sends.
     return;
   }
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
 
   // Navigation request for the app shell.
   if (req.mode === "navigate" || url.pathname === "/") {

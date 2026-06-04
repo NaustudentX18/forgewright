@@ -361,15 +361,11 @@ def test_css_uses_safe_area_insets(tmp_path: Path) -> None:
     assert "100dvh" in text
 
 
-def test_static_payload_under_60kb() -> None:
-    """HTML + CSS + JS combined is below the 60 KB mobile budget.
+def test_static_payload_under_68kb() -> None:
+    """HTML + CSS + JS combined is below the 68 KB mobile budget.
 
-    Bumped from 50 KB → 55 KB when the PWA install banner + SW
-    registration landed in app.js, then 55 KB → 60 KB when the inline
-    critical-CSS in index.html was added to win the external-CSS load
-    race on first paint. The PWA was rendering unstyled for one paint
-    on a fast 3G connection because the external stylesheet hadn't
-    loaded by first contentful paint. See [Unreleased] in CHANGELOG.md.
+    Bumped from 60 KB when the offline outbox, share target, and restored
+    app.js bootstrap landed. See CHANGELOG [Unreleased].
     """
     static = Path(__file__).resolve().parents[3] / "src/forgewright/web/static"
     total = (
@@ -377,7 +373,7 @@ def test_static_payload_under_60kb() -> None:
         + (static / "style.css").stat().st_size
         + (static / "app.js").stat().st_size
     )
-    assert total < 60_000, f"static payload is {total} bytes (limit 60000)"
+    assert total < 68_000, f"static payload is {total} bytes (limit 68000)"
 
 
 def test_manifest_endpoint_returns_pwa_manifest(client: TestClient) -> None:
@@ -439,6 +435,63 @@ def test_manifest_has_pwa_install_fields(client: TestClient) -> None:
         ic.get("purpose") == "maskable" and ic.get("sizes") == "512x512"
         for ic in icons
     ), f"no maskable 512x512 icon in {icons!r}"
+
+
+def test_manifest_has_install_screenshots(client: TestClient) -> None:
+    """Chromium install cards need wide + narrow screenshots."""
+    body = client.get("/static/manifest.webmanifest").json()
+    shots = body.get("screenshots") or []
+    assert len(shots) >= 2
+    forms = {s.get("form_factor") for s in shots}
+    assert "wide" in forms and "narrow" in forms
+    for sc in shots:
+        r = client.get(sc["src"])
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "image/png"
+
+
+def test_manifest_has_share_target(client: TestClient) -> None:
+    """PWA share target wires /share-in for URLs, text, and attachments."""
+    body = client.get("/static/manifest.webmanifest").json()
+    st = body.get("share_target") or {}
+    assert st.get("action") == "/share-in"
+    assert st.get("method") == "POST"
+    files = (st.get("params") or {}).get("files") or []
+    assert files and files[0].get("name") == "media"
+
+
+def test_share_in_get_redirects_to_composer(client: TestClient) -> None:
+    """GET /share-in redirects into the SPA with a prefill payload."""
+    r = client.get(
+        "/share-in",
+        params={"title": "Hi", "text": "Body", "url": "https://example.com"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert loc.startswith("/?shared=")
+    assert "new=1" in loc
+
+
+def test_app_js_has_offline_outbox(client: TestClient) -> None:
+    """Offline sends queue in IndexedDB and show a Queued badge."""
+    js = client.get("/static/app.js").text
+    assert "forgewright-offline-v1" in js
+    assert "enqueueOffline" in js
+    assert "flushQueue" in js
+    assert "queueBadge" in js
+    assert "Queued:" in js
+
+
+def test_app_js_handles_share_prefill(client: TestClient) -> None:
+    js = client.get("/static/app.js").text
+    assert "consumeShareParams" in js
+    assert "AskHuman" in js
+
+
+def test_index_has_queue_badge(client: TestClient) -> None:
+    html = client.get("/").text
+    assert 'id="queueBadge"' in html
 
 
 def test_manifest_shortcuts_have_url(client: TestClient) -> None:
