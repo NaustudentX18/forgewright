@@ -36,7 +36,6 @@ without touching the agent or its base classes.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import time
 from collections.abc import AsyncGenerator
@@ -321,9 +320,20 @@ async def _sse_event_stream(
         raise
     finally:
         # Persist whatever the agent produced, even on client
-        # disconnect. Then surface the agent's own errors.
-        with contextlib.suppress(asyncio.CancelledError, Exception):
+        # disconnect. We swallow only the well-known cancellation /
+        # I/O-completion errors; anything else is logged with the
+        # session id so H2.5 fan-out has structured error events to
+        # forward.
+        try:
             await runner
+        except (asyncio.CancelledError, asyncio.IncompleteReadError):
+            pass
+        except Exception as exc:  # noqa: BLE001 — last-line logging
+            logger.warning(
+                "web.sse.runner_error session_id={} err={!r}",
+                session_id,
+                exc,
+            )
         try:
             session.save(sessions_dir)
         except OSError as exc:  # pragma: no cover — disk
