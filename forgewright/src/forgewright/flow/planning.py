@@ -38,12 +38,14 @@ from forgewright.agent import (
 )
 from forgewright.agent.prompts import load_prompt
 from forgewright.agent.tool_call import ToolCallAgent
+from forgewright.config import get_settings
 from forgewright.flow.planning_prompts import DECOMPOSE_PROMPT
 from forgewright.flow.planning_tool import PlanningTool, Step, StepStatus
 from forgewright.llm import LLM
 from forgewright.logger import logger
 from forgewright.schema import ChatMessage
 from forgewright.tool import ToolCollection
+from forgewright.workspace import Workspace
 
 __all__ = ["FlowResult", "PlanningFlow"]
 
@@ -99,9 +101,10 @@ class PlanningFlow:
         self,
         llm: LLM,
         agents: dict[str, type[Manus]] | None = None,
-        max_total_steps: int = 30,
-        per_agent_max_steps: int = 8,
-        timeout_s: int = 3600,
+        max_total_steps: int | None = None,
+        per_agent_max_steps: int | None = None,
+        timeout_s: int | None = None,
+        workspace: Workspace | None = None,
     ) -> None:
         """Configure the flow.
 
@@ -114,12 +117,21 @@ class PlanningFlow:
                 the flow will execute.
             per_agent_max_steps: Per-sub-agent iteration budget.
             timeout_s: Wall-clock cap on the whole flow (default 60 min).
+            workspace: Optional :class:`Workspace` shared by every
+                sub-agent in the flow. When set, file-editing tools in
+                each sub-agent confine their writes to the workspace
+                root, letting step N discover step N-1's files without
+                an explicit ``StrReplaceEditor`` round-trip.
         """
+        flow_cfg = get_settings().flow
         self.llm = llm
         self.agents = agents or self.DEFAULT_AGENTS
-        self.max_total_steps = max_total_steps
-        self.per_agent_max_steps = per_agent_max_steps
-        self.timeout_s = timeout_s
+        self.max_total_steps = max_total_steps if max_total_steps is not None else flow_cfg.max_total_steps
+        self.per_agent_max_steps = (
+            per_agent_max_steps if per_agent_max_steps is not None else flow_cfg.per_agent_max_steps
+        )
+        self.timeout_s = timeout_s if timeout_s is not None else flow_cfg.timeout_s
+        self.workspace = workspace
         self.planning_tool = PlanningTool()
 
     # ------------------------------------------------------------------ #
@@ -215,6 +227,10 @@ class PlanningFlow:
         system prompt is rebuilt so its "Currently available tools" line
         stays honest after the planning tool is added.
 
+        If the flow was constructed with a :class:`Workspace`, the
+        collection is wired with it so file-editing tools share the
+        same file surface across sub-agents.
+
         We construct the agent with :class:`ToolCallAgent.__init__`
         directly to avoid the subclass's ``__init__`` rebuilding a
         tool collection that omits the planning tool.
@@ -223,7 +239,7 @@ class PlanningFlow:
         defaults = [tool_cls() for tool_cls in cls.DEFAULT_TOOLS]
         # The same PlanningTool instance is reused across steps.
         defaults.append(self.planning_tool)
-        tools = ToolCollection(defaults)
+        tools = ToolCollection(defaults, workspace=self.workspace)
 
         system_prompt = load_prompt(cls.DEFAULT_PROMPT) + self._tools_inventory(tools)
         _ = description  # accepted for future templating

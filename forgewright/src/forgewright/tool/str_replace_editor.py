@@ -10,6 +10,7 @@ from typing import Any, ClassVar
 from forgewright.logger import logger
 from forgewright.schema import ToolResult
 from forgewright.tool.base import BaseTool
+from forgewright.workspace import Workspace
 
 __all__ = ["StrReplaceEditor"]
 
@@ -75,6 +76,10 @@ class StrReplaceEditor(BaseTool):
         """Initialize the per-instance undo-history map and base validator."""
         super().__init__()
         self._history: dict[Path, deque[str]] = {}
+        # When set, path resolution is confined to ``self.workspace.root``
+        # and writes land inside that root. Wired by ``ToolCollection``
+        # (see H1.2). ``None`` preserves the legacy class-level root.
+        self.workspace: Workspace | None = None
 
     async def _run(  # type: ignore[override]
         self,
@@ -122,7 +127,7 @@ class StrReplaceEditor(BaseTool):
 
     def _resolve_path(self, path: str, allow_outside: bool) -> Path:
         """Resolve `path` and ensure it lives inside the workspace root (unless overridden)."""
-        root = self._workspace_root
+        root = self.workspace.root if self.workspace is not None else self._workspace_root
         resolved = Path(path).resolve()
         if allow_outside:
             return resolved

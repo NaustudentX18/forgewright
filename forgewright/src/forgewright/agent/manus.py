@@ -17,6 +17,7 @@ from forgewright.tool import (
     WebSearchTool,
 )
 from forgewright.tool.base import BaseTool
+from forgewright.workspace import LocalWorkspace, Workspace
 
 __all__ = ["Manus"]
 
@@ -38,8 +39,24 @@ class Manus(ToolCallAgent):
     )
     DEFAULT_PROMPT: ClassVar[str] = "manus"
 
-    def __init__(self, llm: LLM, max_steps: int = 8) -> None:
-        tools = ToolCollection([cls() for cls in self.DEFAULT_TOOLS])
+    def __init__(
+        self,
+        llm: LLM,
+        max_steps: int = 8,
+        workspace: Workspace | None = None,
+    ) -> None:
+        """Construct a Manus with its default tool set.
+
+        ``workspace`` is optional; when provided, file-editing tools
+        (currently :class:`StrReplaceEditor`) confine their writes to
+        the workspace root. The CLI passes
+        ``LocalWorkspace(settings.workspace)`` so multi-step plans share
+        a single file surface.
+        """
+        tools = ToolCollection(
+            [cls() for cls in self.DEFAULT_TOOLS],
+            workspace=workspace or LocalWorkspace("./workspace"),
+        )
         prompt = load_prompt(self.DEFAULT_PROMPT) + self._tools_inventory(tools)
         super().__init__(
             llm=llm,

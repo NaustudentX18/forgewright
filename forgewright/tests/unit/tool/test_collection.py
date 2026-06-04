@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
 from forgewright.schema import ToolResult
 from forgewright.tool.base import BaseTool
 from forgewright.tool.collection import ToolCollection
+from forgewright.tool.str_replace_editor import StrReplaceEditor
 from forgewright.tool.terminate import TerminateTool
+from forgewright.workspace import LocalWorkspace
 
 
 class _Alpha(BaseTool):
@@ -151,3 +154,66 @@ async def test_call_with_no_kwargs_dispatches_correctly() -> None:
     coll = ToolCollection([_Beta()])
     r = await coll.call("beta")
     assert r.output == "beta-output"
+
+
+# --------------------------------------------------------------------------- #
+# Workspace threading (H1.2)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_tool_collection_uses_workspace_when_provided(tmp_path: Path) -> None:
+    """``str_replace_editor`` writes land inside the workspace root, not the CWD.
+
+    A path that lives inside the workspace resolves cleanly and the
+    file ends up on disk under the workspace root.
+    """
+    ws = LocalWorkspace(tmp_path)
+    editor = StrReplaceEditor()
+    coll = ToolCollection([editor], workspace=ws)
+
+    target = tmp_path / "out.txt"
+    result = await coll.call(
+        "str_replace_editor",
+        command="create",
+        path=str(target),
+        file_text="hello",
+    )
+    assert result.is_error is False
+    assert target.read_text(encoding="utf-8") == "hello"
+    # The editor is the SAME instance — the collection mutated its
+    # ``workspace`` attribute in place.
+    assert editor.workspace is ws
+
+
+@pytest.mark.asyncio
+async def test_tool_collection_workspace_optional(tmp_path: Path) -> None:
+    """No workspace -> no mutation, existing behaviour preserved."""
+    editor = StrReplaceEditor()
+    coll = ToolCollection([editor])
+    assert coll.workspace is None
+    assert editor.workspace is None
+
+
+@pytest.mark.asyncio
+async def test_tool_collection_set_workspace_after_init(tmp_path: Path) -> None:
+    """``set_workspace`` propagates to every tool that opts in."""
+    editor = StrReplaceEditor()
+    coll = ToolCollection([editor])
+    ws = LocalWorkspace(tmp_path)
+    coll.set_workspace(ws)
+    assert editor.workspace is ws
+
+
+@pytest.mark.asyncio
+async def test_tool_collection_workspace_blocks_outside_workspace(tmp_path: Path) -> None:
+    """A path outside the workspace is still denied by the editor."""
+    ws = LocalWorkspace(tmp_path)
+    coll = ToolCollection([StrReplaceEditor()], workspace=ws)
+    result = await coll.call(
+        "str_replace_editor",
+        command="view",
+        path="/etc/passwd",
+    )
+    assert result.is_error is True
+    assert "outside the workspace" in (result.error or "")
