@@ -797,3 +797,101 @@ def test_events_endpoint_unknown_session_404(audit_client: TestClient) -> None:
     """
     r = audit_client.get("/api/sessions/does-not-exist/events")
     assert r.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Cancellation race on the _ObservableToolCollection
+# (H3.3 — the swap-on-cancel must not corrupt the inner collection or
+# leave a ``tool_result`` event hanging when the SSE client disconnects)
+# --------------------------------------------------------------------------- #
+
+
+import asyncio  # noqa: E402  (kept at module scope for the next tests)
+from typing import Any  # noqa: E402
+
+from forgewright.tool.base import BaseTool  # noqa: E402
+from forgewright.tool.collection import ToolCollection  # noqa: E402
+from forgewright.web.server import _ObservableToolCollection  # noqa: E402
+from forgewright.schema import ToolResult  # noqa: E402
+
+
+class _SleepyTool(BaseTool):
+    """A tool that sleeps until cancelled (for the race test)."""
+
+    name = "sleepy"
+    description = "sleeps until cancelled"
+
+    async def _run(self, **_kwargs: Any) -> ToolResult:
+        await asyncio.sleep(60)  # cancelled long before this returns
+        return ToolResult(output="never", is_error=False)
+
+
+@pytest.mark.asyncio
+async def test_observable_tool_call_records_cancellation() -> None:
+    """Cancelling a ``call`` mid-flight must not leave a tool_result
+    event with stale duration_ms; either a tool_result with is_error
+    is appended, or no tool_result is appended, but the buffer is
+    internally consistent (paired tool_call ↔ tool_result)."""
+    inner = ToolCollection([_SleepyTool()])
+    sink: list[dict[str, Any]] = []
+    obs = _ObservableToolCollection(inner, sink)
+
+    task = asyncio.create_task(obs.call("sleepy"))
+    # Let the event loop schedule the coroutine into the sleep.
+    await asyncio.sleep(0.05)
+    assert any(e.get("event") == "tool_call" for e in sink), (
+        f"tool_call event missing: {sink!r}"
+    )
+    task.cancel()
+    with pytest.raises((asyncio.CancelledError, Exception)):
+        await task
+
+    # We expect either zero or one tool_result entry, but if present it
+    # must carry an error indication (we don't surface a fake "ok"
+    # result for a cancelled call).
+    results = [e for e in sink if e.get("event") == "tool_result"]
+    if results:
+        assert results[0]["data"]["is_error"] is True, (
+            f"cancelled call must surface is_error=True; got {results!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_observable_tool_collection_keeps_inner_callable_after_cancel() -> None:
+    """After a cancellation, the inner collection is still usable.
+
+    The original race: agent.tools is swapped to an _ObservableToolCollection
+    inside the route handler. If the cancel path doesn't restore the
+    original reference, future requests against the same agent see a
+    half-broken proxy. The fix is a try/finally restoring the swap,
+    but the test here is the behavioural contract: cancelling one
+    call must not poison the wrapper."""
+    inner = ToolCollection([_SleepyTool()])
+    sink: list[dict[str, Any]] = []
+    obs = _ObservableToolCollection(inner, sink)
+
+    task = asyncio.create_task(obs.call("sleepy"))
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises((asyncio.CancelledError, Exception)):
+        await task
+
+    # The wrapper's __getattr__ still proxies through, and the inner
+    # collection is unaffected. A subsequent "tool not found" call
+    # must return a structured error (not raise), and the sink must
+    # not have grown a phantom tool_result for it.
+    result = await obs.call("not-a-real-tool")
+    assert result.is_error is True
+    assert "Unknown tool" in (result.error or "")
+    # tool_call was recorded for the unknown tool...
+    unknown_calls = [
+        e for e in sink
+        if e.get("event") == "tool_call" and e["data"].get("tool") == "not-a-real-tool"
+    ]
+    assert len(unknown_calls) == 1
+    # ...and a tool_result with is_error=True was also recorded for it.
+    unknown_results = [
+        e for e in sink
+        if e.get("event") == "tool_result" and e["data"].get("is_error") is True
+    ]
+    assert len(unknown_results) == 1
