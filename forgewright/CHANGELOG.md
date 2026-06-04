@@ -9,6 +9,27 @@ project adheres to [CalVer](https://calver.org/) (`YYYY.MM.PATCH`).
 ## [Unreleased]
 
 ### Fixed
+- **`app.js` was truncated at the top of the file** (missing the IIFE,
+  DOM bindings, and the start of `renderMd`). The web UI could not run
+  in a browser. Restored the bootstrap and kept all PWA/mobile logic.
+
+### Added
+- **Offline message outbox (mobile).** IndexedDB queue
+  (`forgewright-offline-v1`), **Queued: N** top-bar badge, flush on
+  `online` and via Background Sync (`fw-flush-queue`). SSE POSTs still
+  bypass the service worker.
+- **PWA share target.** Manifest + `/share-in` (server + SW) prefill the
+  composer with AskHuman-style context for shared URLs, text, and
+  attachment metadata.
+- **Install-card screenshots.** `tools/regen_pwa_screenshots.py` and
+  `static/screenshots/{desktop,mobile}.png` referenced from the manifest.
+- Service worker cache bumped to `forgewright-shell-v2`.
+
+### Changed
+- Static payload budget **60 KB → 68 KB** (offline queue + restored
+  `app.js`).
+
+### Fixed (earlier unreleased)
 - **BYOK path was completely broken.** `LLMBackend.from_config` claimed
   to support `provider="anthropic" | "openai" | "google" | "azure" |
   "bedrock" | "ollama" | "openrouter"` (per `LLMConfig`'s Literal

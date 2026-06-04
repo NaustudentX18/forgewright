@@ -1,4 +1,65 @@
-      .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+(function () {
+  "use strict";
+
+  var sidebar = document.getElementById("sidebar");
+  var scrim = document.getElementById("scrim");
+  var openBtn = document.getElementById("openSidebar");
+  var closeBtn = document.getElementById("closeSidebar");
+  var sessionList = document.getElementById("sessionList");
+  var newChatBtn = document.getElementById("newChat");
+  var newChatSidebarBtn = document.getElementById("newChatSidebar");
+  var titleEl = document.getElementById("title");
+  var connectionPill = document.getElementById("connectionPill");
+  var connectionLabel = connectionPill ? connectionPill.querySelector(".label") : null;
+  var queueBadge = document.getElementById("queueBadge");
+  var settingsBtn = document.getElementById("settingsBtn");
+  var settingsModal = document.getElementById("settingsModal");
+  var settingsProvider = document.getElementById("settingsProvider");
+  var settingsModel = document.getElementById("settingsModel");
+  var settingsStatus = document.getElementById("settingsStatus");
+  var messagesEl = document.getElementById("messages");
+  var emptyState = document.getElementById("emptyState");
+  var composer = document.getElementById("composer");
+  var input = document.getElementById("input");
+  var sendBtn = document.getElementById("send");
+  var stopBtn = document.getElementById("stop");
+  var toast = document.getElementById("toast");
+  var toastMsg = toast ? toast.querySelector(".toast-msg") : null;
+
+  var state = {
+    sessionId: null,
+    sessions: [],
+    sending: false,
+    abortCtrl: null,
+    hasRenderedHistory: false,
+    placeholderIdx: 0,
+    placeholderTimer: null
+  };
+
+  var QUEUE_DB = "forgewright-offline-v1";
+  var QUEUE_STORE = "outbox";
+  var SYNC_TAG = "fw-flush-queue";
+
+  function escapeHtml(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function renderMd(src) {
+    var PLACEHOLDER = "\uE000FW\uE001";
+    var fences = [];
+    var escaped = escapeHtml(src);
+    escaped = escaped.replace(/```([^\n`]*)\n([\s\S]*?)```/g, function (_m, lang, code) {
+      var idx = fences.length;
+      fences.push({ lang: lang, html: highlightCode(code, lang) });
+      return PLACEHOLDER + idx + PLACEHOLDER;
+    });
+    escaped = escaped.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+    escaped = escaped.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+    escaped = escaped.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
     escaped = escaped.replace(new RegExp(PLACEHOLDER + "(\\d+)" + PLACEHOLDER, "g"), function (_m, n) {
       var f = fences[parseInt(n, 10)];
       var langHtml = f.lang ? '<span class="lang">' + escapeHtml(f.lang) + '</span>' : "";
@@ -498,19 +559,32 @@
   function send(text) {
     text = (text || "").trim();
     if (!text || state.sending) return;
+    addMessage("user", text);
+    if (!navigator.onLine) {
+      enqueueOffline(text).then(function () {
+        updateQueueBadge();
+        registerBackgroundSync();
+        showToast("Message queued — will send when you are back online");
+      }).catch(function (err) {
+        showToast("Could not queue message: " + (err.message || String(err)));
+      });
+      return;
+    }
     state.sending = true;
     sendBtn.disabled = true;
     sendBtn.setAttribute("hidden", "");
     stopBtn.removeAttribute("hidden");
     sendBtn.classList.add("sent");
     setTimeout(function () { sendBtn.classList.remove("sent"); }, 700);
-    addMessage("user", text);
     var placeholder = addMessage("assistant", "");
     sawToken = false;
     function start() {
-      return postJson("/api/sessions", {}).then(function (sess) {
+      var p = state.sessionId
+        ? Promise.resolve({ id: state.sessionId })
+        : postJson("/api/sessions", {});
+      return p.then(function (sess) {
         state.sessionId = sess.id;
-        titleEl.textContent = (sess.title || "Chat");
+        titleEl.textContent = sess.title || "Chat";
         return runStream(
           "/api/sessions/" + encodeURIComponent(state.sessionId) + "/messages",
           { content: text },
@@ -589,7 +663,7 @@
             if (placeholder) placeholder.classList.remove("streaming");
             finalText = p.content || "";
             if (!finalText.trim()) finalText = "No response — try again";
-            if (!p.content || !state.sawToken) {
+            if (!p.content || !sawToken) {
               setAssistantText(placeholder, finalText);
             }
             setStatus(null);
@@ -625,8 +699,173 @@
       else composer.dispatchEvent(new Event("submit", { cancelable: true }));
     });
   });
+
+  // --- Offline outbox (IndexedDB + Background Sync) -------------------
+  function openQueueDb() {
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(QUEUE_DB, 1);
+      req.onupgradeneeded = function () {
+        req.result.createObjectStore(QUEUE_STORE, { keyPath: "id", autoIncrement: true });
+      };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+
+  function updateQueueBadge() {
+    if (!queueBadge) return;
+    return openQueueDb().then(function (db) {
+      return new Promise(function (resolve) {
+        var tx = db.transaction(QUEUE_STORE, "readonly");
+        var req = tx.objectStore(QUEUE_STORE).count();
+        req.onsuccess = function () {
+          var n = req.result || 0;
+          if (n > 0) {
+            queueBadge.textContent = "Queued: " + n;
+            queueBadge.removeAttribute("hidden");
+          } else {
+            queueBadge.setAttribute("hidden", "");
+          }
+          resolve(n);
+        };
+        req.onerror = function () { resolve(0); };
+      });
+    }).catch(function () { return 0; });
+  }
+
+  function registerBackgroundSync() {
+    if (!("serviceWorker" in navigator) || !("SyncManager" in window)) return;
+    navigator.serviceWorker.ready.then(function (reg) {
+      return reg.sync.register(SYNC_TAG);
+    }).catch(function () {});
+  }
+
+  function enqueueOffline(content) {
+    return openQueueDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(QUEUE_STORE, "readwrite");
+        tx.objectStore(QUEUE_STORE).add({
+          sessionId: state.sessionId,
+          content: content,
+          createdAt: new Date().toISOString()
+        });
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+
+  function sendQueuedItem(item) {
+    var text = item.content;
+    var placeholder = addMessage("assistant", "");
+    state.sending = true;
+    sendBtn.disabled = true;
+    sendBtn.setAttribute("hidden", "");
+    stopBtn.removeAttribute("hidden");
+    sawToken = false;
+    function ensureSession() {
+      if (item.sessionId) {
+        state.sessionId = item.sessionId;
+        return Promise.resolve();
+      }
+      return postJson("/api/sessions", {}).then(function (sess) {
+        state.sessionId = sess.id;
+        titleEl.textContent = sess.title || "Chat";
+      });
+    }
+    return ensureSession().then(function () {
+      return runStream(
+        "/api/sessions/" + encodeURIComponent(state.sessionId) + "/messages",
+        { content: text },
+        placeholder
+      );
+    }).catch(function (err) {
+      if (err && err.name === "AbortError") return;
+      setAssistantText(placeholder, "[error] " + (err.message || String(err)));
+      throw err;
+    }).then(finish);
+  }
+
+  function flushQueue() {
+    if (!navigator.onLine || state.sending) return Promise.resolve();
+    return openQueueDb().then(function (db) {
+      return new Promise(function (resolve) {
+        var tx = db.transaction(QUEUE_STORE, "readonly");
+        var req = tx.objectStore(QUEUE_STORE).getAll();
+        req.onsuccess = function () { resolve(req.result || []); };
+        req.onerror = function () { resolve([]); };
+      }).then(function (items) {
+        if (!items.length) return updateQueueBadge();
+        var chain = Promise.resolve();
+        items.forEach(function (item) {
+          chain = chain.then(function () {
+            return sendQueuedItem(item).then(function () {
+              return openQueueDb().then(function (db2) {
+                return new Promise(function (res, rej) {
+                  var tx2 = db2.transaction(QUEUE_STORE, "readwrite");
+                  tx2.objectStore(QUEUE_STORE).delete(item.id);
+                  tx2.oncomplete = function () { res(); };
+                  tx2.onerror = function () { rej(tx2.error); };
+                });
+              });
+            });
+          });
+        });
+        return chain.then(updateQueueBadge);
+      });
+    }).catch(function () {});
+  }
+
+  window.addEventListener("online", function () {
+    setConnection("online", "Online");
+    flushQueue();
+  });
+  window.addEventListener("offline", function () {
+    setConnection("reconnecting", "Offline");
+  });
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.addEventListener("message", function (ev) {
+      if (ev.data && ev.data.type === SYNC_TAG) flushQueue();
+    });
+  }
+
+  // --- Web Share Target (URL / text / title -> composer) --------------
+  function formatSharePayload(params) {
+    var parts = ["[Shared to forgewright — treat as AskHuman context]"];
+    if (params.title) parts.push("Title: " + params.title);
+    if (params.url) parts.push("URL: " + params.url);
+    if (params.text) parts.push("Text: " + params.text);
+    return parts.join("\n");
+  }
+
+  function consumeShareParams() {
+    var qs = new URLSearchParams(window.location.search);
+    var title = qs.get("title") || "";
+    var text = qs.get("text") || "";
+    var url = qs.get("url") || "";
+    var shared = qs.get("shared") || "";
+    if (!title && !text && !url && !shared) return;
+    var payload;
+    if (shared) {
+      try { payload = decodeURIComponent(shared); } catch (e) { payload = shared; }
+    } else {
+      payload = formatSharePayload({ title: title, text: text, url: url });
+    }
+    if (qs.get("new") === "1") newChat();
+    input.value = payload;
+    autosize();
+    stopPlaceholderCycle();
+    input.focus();
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }
+
   loadSessions();
   showEmpty();
+  consumeShareParams();
+  updateQueueBadge();
 
   // Stop / cancel — POST to the abort endpoint when the user clicks
   // the red button during an in-flight run. The server emits

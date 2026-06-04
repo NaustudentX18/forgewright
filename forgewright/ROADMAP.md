@@ -76,12 +76,14 @@ The full BUILD_PLAN §3-§11. 617 unit tests, 0 regressions.
 
 - **Textual TUI** as a peer to the web chat. Reuses the SSE consumer, adds
   a sidebar tree, vim-keys, command palette. The web chat stays primary.
-- **Offline message queue** with Background Sync (where supported) and a
-  last-resort IndexedDB queue on iOS. Today the SW only handles reads;
-  writes while offline drop. Add a tiny "Queued: 3" badge.
-- **Manifest screenshots** — Playwright-driven generator at
-  `tools/regen_pwa_screenshots.py` to produce `screenshots/desktop.png`
-  and `screenshots/mobile.png` so the install card previews on Chromium.
+- ~~**Offline message queue**~~ — **Shipped on `master`:** IndexedDB outbox,
+  Background Sync (`fw-flush-queue`), **Queued: N** badge, auto-flush on
+  `online`. SSE POSTs still bypass the SW.
+- ~~**Manifest screenshots**~~ — **Shipped:** `tools/regen_pwa_screenshots.py`
+  + `static/screenshots/{desktop,mobile}.png` referenced from the manifest.
+- ~~**Mobile-share target**~~ — **Shipped:** manifest `share_target` →
+  `/share-in`, server redirect + SW POST handler, composer prefill for
+  AskHuman-style context (URL/text/attachment metadata).
 - **MCP registry client** — `forgewright mcp install <name>` against
   `registry.modelcontextprotocol.io` (the spec landed in 2025-Q4). Today
   the install path is hand-written.
@@ -119,9 +121,7 @@ Things we want but haven't scoped. Open a Discussion to bump one up.
 
 - **Voice in / voice out.** Whisper.cpp for STT, Piper for TTS, both
   in-process on a Pi 5. Useful for the agent-in-your-pocket framing.
-- **Mobile-share target.** PWA `share_target` so a photo or URL shared
-  to forgewright on iOS becomes an `AskHuman` payload. Requires a
-  web-share-target service worker shim and HTTPS (we have the latter).
+- ~~**Mobile-share target.**~~ Moved to **Shipped** (see v0.2 above).
 - **gVisor + Firecracker CI runners.** Today's `sandbox doctor` works,
   but the CI matrix doesn't actually run inside a sandbox. We pretend
   the audit log is enough. It isn't.

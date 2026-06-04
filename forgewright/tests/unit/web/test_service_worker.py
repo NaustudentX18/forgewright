@@ -51,7 +51,7 @@ def test_sw_uses_versioned_cache_name() -> None:
     Locking the literal here means a future refactor that silently
     renames the cache fails this test, not on a phone at 3am."""
     src = _read()
-    assert "forgewright-shell-v1" in src
+    assert "forgewright-shell-v2" in src
 
 
 def test_sw_bypasses_post_for_sse() -> None:
@@ -65,21 +65,19 @@ def test_sw_bypasses_post_for_sse() -> None:
     """
     src = _read()
     # Locate the fetch handler block.
-    fetch_idx = src.index('addEventListener("fetch"')
+    # Use the main GET fetch handler (last ``fetch`` listener in sw.js).
+    fetch_idx = src.rindex('addEventListener("fetch"')
     fetch_block = src[fetch_idx:]
     # Inside the fetch block, the very first non-comment, non-whitespace
     # logical branch must be the method check.
+    assert 'pathname === "/share-in"' in fetch_block
     assert 'req.method !== "GET"' in fetch_block, (
-        "fetch handler must short-circuit on non-GET before respondWith"
+        "fetch handler must short-circuit on non-GET before GET caching"
     )
-    # And the SW must NOT respondWith when method !== GET.
-    # Easiest stable assertion: the GET-only branch uses respondWith,
-    # the bypass path returns early.
-    bypass_idx = fetch_block.index('req.method !== "GET"')
-    before_bypass = fetch_block[:bypass_idx]
-    # No respondWith calls before the bypass.
-    assert "respondWith" not in before_bypass, (
-        "respondWith is being called before the POST bypass — SSE will break"
+    # Only POST /share-in may call respondWith; SSE message POSTs bypass.
+    before_sse_bypass = fetch_block.split('req.method !== "GET"')[0]
+    assert before_sse_bypass.count("respondWith") == 1, (
+        "only /share-in POST may respondWith before the generic POST bypass"
     )
 
 
@@ -89,7 +87,7 @@ def test_sw_fetches_are_same_origin_only() -> None:
     the fetch handler.
     """
     src = _read()
-    fetch_idx = src.index('addEventListener("fetch"')
+    fetch_idx = src.rindex('addEventListener("fetch"')
     fetch_block = src[fetch_idx:]
     assert "self.location.origin" in fetch_block, (
         "fetch handler must check url.origin against self.location.origin"
@@ -114,6 +112,20 @@ def test_sw_precaches_app_shell() -> None:
     ]
     for url in required:
         assert url in src, f"shell precache missing: {url}"
+
+
+def test_sw_registers_background_sync_flush() -> None:
+    """Background Sync tag must match app.js so the outbox flushes."""
+    src = _read()
+    assert "fw-flush-queue" in src
+    assert 'addEventListener("sync"' in src
+
+
+def test_sw_handles_share_in_post() -> None:
+    """POST /share-in is handled in the SW for PWA file shares."""
+    src = _read()
+    assert "/share-in" in src
+    assert "handleShareIn" in src
 
 
 def test_sw_handlers_actually_respond_with_something() -> None:
