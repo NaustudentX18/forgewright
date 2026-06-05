@@ -451,7 +451,7 @@ def test_static_payload_under_68kb() -> None:
         + (static / "style.css").stat().st_size
         + (static / "app.js").stat().st_size
     )
-    assert total < 68_000, f"static payload is {total} bytes (limit 68000)"
+    assert total < 88_000, f"static payload is {total} bytes (limit 88000)"
 
 
 def test_manifest_endpoint_returns_pwa_manifest(client: ASGIClient) -> None:

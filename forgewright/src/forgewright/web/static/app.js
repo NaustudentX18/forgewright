@@ -918,4 +918,126 @@
         .catch(function (err) { console.warn("sw.register.failed", err); });
     });
   }
+
+  // --- Theme Customizer and Setup Wizard Implementation ---
+  (function initThemeAndWizard() {
+    var STORAGE_ACCENT_KEY = "fw-theme-accent";
+    var STORAGE_WIZARD_KEY = "fw-wizard-complete";
+    var root = document.documentElement;
+
+    // Load persisted theme accent
+    var savedAccent = localStorage.getItem(STORAGE_ACCENT_KEY);
+    if (savedAccent) {
+      root.style.setProperty("--theme-accent", savedAccent);
+      var select = document.getElementById("themeColorSelect");
+      if (select) select.value = savedAccent;
+    }
+
+    // Settings Accent change handler
+    var select = document.getElementById("themeColorSelect");
+    if (select) {
+      select.addEventListener("change", function (e) {
+        var val = e.target.value;
+        root.style.setProperty("--theme-accent", val);
+        localStorage.setItem(STORAGE_ACCENT_KEY, val);
+      });
+    }
+
+    // Setup Wizard elements
+    var wizardModal = document.getElementById("wizardModal");
+    var wizardSteps = document.querySelectorAll(".wizard-step");
+    var wizardNext = document.getElementById("wizardNext");
+    var wizardPrev = document.getElementById("wizardPrev");
+    var indicatorDots = document.querySelectorAll(".indicator-dot");
+    var currentStep = 1;
+
+    function updateStep() {
+      wizardSteps.forEach(function (step) {
+        step.classList.remove("active");
+        if (parseInt(step.getAttribute("data-step"), 10) === currentStep) {
+          step.classList.add("active");
+        }
+      });
+
+      indicatorDots.forEach(function (dot) {
+        dot.classList.remove("active");
+        if (parseInt(dot.getAttribute("data-dot"), 10) === currentStep) {
+          dot.classList.add("active");
+        }
+      });
+
+      if (currentStep === 1) {
+        wizardPrev.style.visibility = "hidden";
+        wizardNext.textContent = "Next";
+      } else if (currentStep === wizardSteps.length) {
+        wizardPrev.style.visibility = "visible";
+        wizardNext.textContent = "Finish";
+      } else {
+        wizardPrev.style.visibility = "visible";
+        wizardNext.textContent = "Next";
+      }
+    }
+
+    if (wizardPrev) {
+      wizardPrev.addEventListener("click", function () {
+        if (currentStep > 1) {
+          currentStep--;
+          updateStep();
+        }
+      });
+    }
+
+    if (wizardNext) {
+      wizardNext.addEventListener("click", function () {
+        if (currentStep < wizardSteps.length) {
+          currentStep++;
+          updateStep();
+        } else {
+          // Finish wizard
+          localStorage.setItem(STORAGE_WIZARD_KEY, "true");
+          var apiKeyVal = document.getElementById("wizardApiKey").value;
+          var providerVal = document.getElementById("wizardProvider").value;
+          if (apiKeyVal) {
+            // In a real application, you might post this to the backend.
+            // For now, save locally to signal setup complete
+            console.log("Configured provider:", providerVal, "with API key length:", apiKeyVal.length);
+          }
+          if (wizardModal) {
+            if (typeof wizardModal.close === "function") {
+              wizardModal.close();
+            } else {
+              wizardModal.removeAttribute("open");
+            }
+          }
+          showToast("forgewright configured successfully! Enjoy the vibe!");
+        }
+      });
+    }
+
+    // Theme Selector Buttons inside Wizard step 3
+    var themeDots = document.querySelectorAll(".theme-dot");
+    themeDots.forEach(function (dot) {
+      dot.addEventListener("click", function () {
+        themeDots.forEach(function (d) { d.classList.remove("active"); });
+        dot.classList.add("active");
+        var val = dot.getAttribute("data-color");
+        root.style.setProperty("--theme-accent", val);
+        localStorage.setItem(STORAGE_ACCENT_KEY, val);
+        var selectEl = document.getElementById("themeColorSelect");
+        if (selectEl) selectEl.value = val;
+      });
+    });
+
+    // Automatically trigger Setup Wizard on first load
+    var wizardComplete = localStorage.getItem(STORAGE_WIZARD_KEY);
+    if (!wizardComplete && wizardModal) {
+      setTimeout(function () {
+        if (typeof wizardModal.showModal === "function") {
+          wizardModal.showModal();
+        } else {
+          wizardModal.setAttribute("open", "");
+        }
+      }, 500);
+    }
+  })();
 })();

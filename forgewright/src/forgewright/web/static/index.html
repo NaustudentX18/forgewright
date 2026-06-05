@@ -171,10 +171,89 @@ html, body { margin: 0; padding: 0; height: 100%; background: var(--color-backgr
         <span class="setting-value" id="settingsModel">&mdash;</span>
       </div>
       <div class="setting-row">
-        <span class="setting-label">Status</span>
-        <span class="setting-value" id="settingsStatus">&mdash;</span>
+        <span class="setting-label">Accent Color</span>
+        <span class="setting-value">
+          <select id="themeColorSelect" aria-label="Accent Color">
+            <option value="#22C55E">Green (Default)</option>
+            <option value="#3B82F6">Blue</option>
+            <option value="#A855F7">Purple</option>
+            <option value="#EC4899">Pink</option>
+            <option value="#F97316">Orange</option>
+          </select>
+        </span>
       </div>
       <p class="settings-note">Settings panel is read-only. Real configuration lives in <code>~/.config/forgewright/</code>.</p>
+    </div>
+  </dialog>
+
+  <!-- SETUP WIZARD MODAL -->
+  <dialog class="wizard-modal" id="wizardModal" aria-label="Setup Wizard">
+    <div class="wizard-head">
+      <span>Welcome to forgewright</span>
+    </div>
+    <div class="wizard-body">
+      <!-- Step 1: Mascot Intro -->
+      <div class="wizard-step active" data-step="1">
+        <div class="mascot-container">
+          <svg class="mascot-poo-svg" viewBox="0 0 100 100" width="80" height="80" style="animation: float 3s ease-in-out infinite;">
+            <!-- Simple cute claymation poo drawing with SVG paths -->
+            <path d="M50 15 C40 15 45 30 35 35 C25 40 15 50 15 65 C15 80 30 85 50 85 C70 85 85 80 85 65 C85 50 75 40 65 35 C55 30 60 15 50 15 Z" fill="#8B5A2B" stroke="#5C3A21" stroke-width="3"/>
+            <path d="M30 45 C35 40 65 40 70 45 C75 50 70 60 65 62 C50 65 50 65 35 62 C30 60 25 50 30 45 Z" fill="#9C6B3C"/>
+            <!-- Cute eyes -->
+            <circle cx="40" cy="52" r="5" fill="#FFFFFF"/>
+            <circle cx="40" cy="52" r="2.5" fill="#000000"/>
+            <circle cx="60" cy="52" r="5" fill="#FFFFFF"/>
+            <circle cx="60" cy="52" r="2.5" fill="#000000"/>
+            <!-- Smile -->
+            <path d="M46 62 Q50 66 54 62" stroke="#5C3A21" stroke-width="3" fill="none" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <h3>Meet Dumpi, your code-polishing assistant!</h3>
+        <p>forgewright is a CLI-first AI agent that turns your vibe coding slop ideas into fully polished, working code templates. Let's configure your setup so you can start building immediately.</p>
+      </div>
+
+      <!-- Step 2: Keys -->
+      <div class="wizard-step" data-step="2">
+        <h3>API Keys & Configuration</h3>
+        <p>forgewright requires a model provider to function. Fill in your preferred API key below:</p>
+        <div class="wizard-input-group">
+          <label for="wizardProvider">Model Provider</label>
+          <select class="wizard-input" id="wizardProvider">
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic Claude</option>
+            <option value="google">Google Gemini</option>
+            <option value="ollama">Ollama (Local)</option>
+          </select>
+        </div>
+        <div class="wizard-input-group">
+          <label for="wizardApiKey">API Key</label>
+          <input type="password" class="wizard-input" id="wizardApiKey" placeholder="sk-..." autocomplete="off">
+        </div>
+      </div>
+
+      <!-- Step 3: Customization -->
+      <div class="wizard-step" data-step="3">
+        <h3>Theme Customization</h3>
+        <p>Pick a vibe for your chat dashboard theme. You can change this at any time in the settings panel:</p>
+        <div class="wizard-theme-colors">
+          <button class="theme-dot active" style="background:#22C55E" data-color="#22C55E" title="Green" aria-label="Green Accent"></button>
+          <button class="theme-dot" style="background:#3B82F6" data-color="#3B82F6" title="Blue" aria-label="Blue Accent"></button>
+          <button class="theme-dot" style="background:#A855F7" data-color="#A855F7" title="Purple" aria-label="Purple Accent"></button>
+          <button class="theme-dot" style="background:#EC4899" data-color="#EC4899" title="Pink" aria-label="Pink Accent"></button>
+          <button class="theme-dot" style="background:#F97316" data-color="#F97316" title="Orange" aria-label="Orange Accent"></button>
+        </div>
+      </div>
+    </div>
+    <div class="wizard-footer">
+      <div class="wizard-indicator">
+        <span class="indicator-dot active" data-dot="1"></span>
+        <span class="indicator-dot" data-dot="2"></span>
+        <span class="indicator-dot" data-dot="3"></span>
+      </div>
+      <div>
+        <button class="wizard-btn" id="wizardPrev" type="button" style="visibility:hidden">Back</button>
+        <button class="wizard-btn primary-btn" id="wizardNext" type="button">Next</button>
+      </div>
     </div>
   </dialog>
 </div>
