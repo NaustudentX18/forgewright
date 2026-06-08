@@ -22,7 +22,7 @@ Bind = Literal["loopback", "lan", "tailscale", "all"]
 _BIND_HOST: dict[str, str] = {
     "loopback": "127.0.0.1",
     "lan": "0.0.0.0",
-    "tailscale": "100.124.255.77",  # aiserver Tailscale IP from CLAUDE.md
+    "tailscale": "<your-tailnet-ip>",  # set FORGEWRIGHT_TS_BIND to your tailnet IP
     "all": "0.0.0.0",
 }
 
@@ -56,7 +56,7 @@ def web_command(
           reach the Pi at ``http://<pi-lan-ip>:8787``. PWA install
           on iOS will *not* work without HTTPS.
         * ``tailscale`` — bind the aiserver Tailscale IP
-          (``100.124.255.77``) so other tailnet devices can reach
+          (``<your-tailnet-ip>``) so other tailnet devices can reach
           the server. Pair with ``--tailscale-serve`` for HTTPS.
         * ``all`` — same as ``lan``.
     tailscale_serve

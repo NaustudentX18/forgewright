@@ -43,7 +43,7 @@ uv run --extra web forgewright web --bind tailscale --tailscale-serve
 What that does:
 
 - `--bind tailscale` → binds the aiserver Tailscale IP
-  (`100.124.255.77`) so other tailnet devices can reach the
+  (`<your-tailnet-ip>`) so other tailnet devices can reach the
   server directly.
 - `--tailscale-serve` → shells out to
   `tailscale serve --bg --https=443 http://localhost:8787` so the

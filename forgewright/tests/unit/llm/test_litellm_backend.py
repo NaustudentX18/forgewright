@@ -221,11 +221,11 @@ class TestNormalizeAssistant:
 class TestCompletionParams:
     def test_ollama_uses_api_base(self) -> None:
         cfg = _cfg(
-            "ollama", model="qwen3-14b-agent", base_url="http://pc.local:11434"
+            "ollama", model="qwen3-14b-agent", base_url="http://example.local:11434"
         )
         b = LiteLLMBackend(cfg)
         params = b._completion_params()
-        assert params["api_base"] == "http://pc.local:11434"
+        assert params["api_base"] == "http://example.local:11434"
         assert params["model"] == "ollama_chat/qwen3-14b-agent"
         assert "base_url" not in params
 

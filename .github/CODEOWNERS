@@ -1,0 +1,9 @@
+# Default owners for everything
+*       @NaustudentX18
+
+# Critical paths get a second review
+/forgewright/src/forgewright/agent/   @NaustudentX18
+/forgewright/src/forgewright/llm/     @NaustudentX18
+/forgewright/src/forgewright/security/ @NaustudentX18
+/forgewright/.github/workflows/       @NaustudentX18
+/forgewright/docs/ARCHITECTURE.md     @NaustudentX18

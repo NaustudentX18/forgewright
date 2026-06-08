@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="forgewright mark">
+  <title>forgewright</title>
+  <desc>A faceted anvil with a spark above and a terminal cursor block at the lower right, on a warm charcoal tile.</desc>
+
+  <!-- Warm charcoal background tile (rounded square) -->
+  <rect x="0" y="0" width="64" height="64" rx="10" ry="10" fill="#1F1813"/>
+
+  <!-- Spark: three small triangles above the anvil's strike point -->
+  <polygon points="32,7  30,12  34,12" fill="#FCD34D"/>
+  <polygon points="26,10 24,14 28,14" fill="#F59E0B" opacity="0.85"/>
+  <polygon points="38,10 36,14 40,14" fill="#F59E0B" opacity="0.85"/>
+
+  <!-- Anvil: faceted 3-face design
+       Top face (darker, slightly trapezoidal) -->
+  <polygon points="11,24 53,24 49,30 15,30" fill="#C75A1F"/>
+  <!-- Front face (primary forge orange) -->
+  <rect x="15" y="30" width="34" height="14" fill="#E97D3A"/>
+  <!-- Waist shadow band (suggests the anvil's narrow waist) -->
+  <rect x="20" y="38" width="24" height="2" fill="#A85420"/>
+  <!-- Foot (base) -->
+  <polygon points="15,44 49,44 46,52 18,52" fill="#A85420"/>
+  <!-- Right-side facet (subtle depth) -->
+  <polygon points="49,30 53,24 53,30" fill="#8B3F12"/>
+
+  <!-- Terminal cursor block: overlaps the anvil's lower-right -->
+  <rect x="44" y="48" width="14" height="10" fill="#FCD34D"/>
+  <!-- Cursor gap (negative space inside the block) -->
+  <rect x="50" y="51" width="2" height="4" fill="#1F1813"/>
+</svg>

@@ -75,8 +75,8 @@ Plus 14 new tests across 3 files.
 - mem2vault syncs every 5 min
 
 ### Local model ecosystem (Forest's hardware)
-- Pi 5 16GB primary, Tailscale 100.124.255.77
-- PC Ollama at `desktop-ujsii52.local:11434` (Tailscale: 100.127.91.97:11434)
+- Pi 5 16GB primary, Tailscale `<redacted-tailnet-ip>`
+- PC Ollama at `<redacted-hostname>:11434` (Tailscale: `<redacted-tailnet-ip>`:11434)
 - Model catalog in `~/.claude/CLAUDE.md` — preset names: `fast`/`balanced`/`quality`/`agent`/`tiny`
 - **Don't SSH-tunnel** — use Tailscale direct IP (tunnels timeout)
 
