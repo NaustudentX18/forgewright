@@ -172,7 +172,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download artefacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
@@ -196,7 +196,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download artefacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
@@ -252,21 +252,21 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download artefacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
           merge-multiple: true
 
       - name: Download signatures
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: signatures
           path: dist/
           merge-multiple: true
 
       - name: Download platform wheels
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           path: wheels/
@@ -332,7 +332,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download artefacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
