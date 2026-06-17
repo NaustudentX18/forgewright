@@ -620,7 +620,7 @@ toml = [
 
 [[package]]
 name = "crawl4ai"
-version = "0.8.7"
+version = "0.8.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -657,9 +657,9 @@ dependencies = [
     { name = "unclecode-litellm" },
     { name = "xxhash" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ca/88/e69eb33cf818a94c1419b8b537ac1c08d8d4c88e0e234c4325ae069d0e6e/crawl4ai-0.8.7.tar.gz", hash = "sha256:25f4e67d6ed95d08a145a544c686620d579b1608c2bcb154a8c0ffd664e0305f", size = 606384, upload-time = "2026-06-01T14:24:23.7Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/90/2b/9e2b376ec8d4b803cc7b47b428a0ac762c59ce1215d0ab5a4aa9e7afc4a3/crawl4ai-0.8.9.tar.gz", hash = "sha256:00a3c97b9492a694f24fa66bc80b9f1533e5637745dc0e30914c88aac52763e3", size = 608119, upload-time = "2026-06-04T06:19:16.08Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/af/4e/029a12cf2287337340c5c3d1aaf4d32c6e0a4cdc0a37c5d937740b396902/crawl4ai-0.8.7-py3-none-any.whl", hash = "sha256:4be81b0f04332e6a9501baa7d854ebc32ce3fc627c6f00ce6ea5034b91d40ddc", size = 515784, upload-time = "2026-06-01T14:24:21.773Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/97/6443bf99add1c16b16d992b8d0816a3ce7adecde37323d368bed36dd0aff/crawl4ai-0.8.9-py3-none-any.whl", hash = "sha256:7836cfc9d81ed7fc646d614e984402c336e5a682462f3d92ff37de121a4244d6", size = 516731, upload-time = "2026-06-04T06:19:14.348Z" },
 ]
 
 [[package]]
@@ -952,7 +952,7 @@ wheels = [
 
 [[package]]
 name = "forgewright"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -1030,7 +1030,7 @@ requires-dist = [
     { name = "altair", marker = "extra == 'viz'", specifier = ">=5" },
     { name = "anthropic", marker = "extra == 'llm'", specifier = ">=0.30" },
     { name = "beautifulsoup4", specifier = ">=4.12" },
-    { name = "crawl4ai", marker = "extra == 'crawl'", specifier = ">=0.3" },
+    { name = "crawl4ai", marker = "extra == 'crawl'", specifier = ">=0.8.9" },
     { name = "docker", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "docker", marker = "extra == 'sandbox'", specifier = ">=7.0" },
     { name = "docker-stubs", marker = "extra == 'dev'", specifier = ">=0.1" },

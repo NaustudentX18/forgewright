@@ -53,7 +53,7 @@ sandbox = [
   "docker>=7.0",
 ]
 crawl = [
-  "crawl4ai>=0.3",
+  "crawl4ai>=0.8.9",
 ]
 viz = [
   "altair>=5",
