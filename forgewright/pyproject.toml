@@ -44,7 +44,7 @@ llm = [
 ]
 mcp = [
   "fastmcp>=0.4",
-  "mcp>=1.0",
+  "mcp>=1.28.1",
 ]
 browser = [
   "playwright>=1.46",
